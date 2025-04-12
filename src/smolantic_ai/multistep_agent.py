@@ -1,9 +1,11 @@
 from typing import Any, Dict, List, Optional, TypeVar, Generic, Callable, Union
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, Tool
+from pydantic_ai import UserPromptNode, ModelRequestNode, CallToolsNode
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.settings import ModelSettings # Import ModelSettings
 from pydantic_ai.messages import ModelRequest,SystemPromptPart,UserPromptPart
+from pydantic_graph import End # <-- Keep End import
 from .models import Message, MessageRole, ActionStep, AgentMemory, MultistepResult, PlanningStep, TaskStep, FinalAnswerStep
 from .config import settings # Import settings
 from .logging import get_logger
@@ -15,6 +17,7 @@ from .prompts import (
 )
 import json
 from jinja2 import Template # Import Jinja2 Template
+from pydantic_ai import messages as pydantic_ai_messages
 
 class PlanningResponse(BaseModel):
     """Response model for planning steps."""
@@ -46,11 +49,13 @@ class MultistepAgent(Agent[None, T]):
         
         # Determine the effective model string or instance for super()
         if model is None:
-            # Use default from settings if no model is provided
-            model_input = f"{settings.multistep_model.provider}:{settings.multistep_model.model_name}"
+            # Use default unified model from settings
+            provider = settings.model.provider
+            name = settings.model.model_name
+            model_input = f"{provider}:{name}"
         else:
             # Pass the provided string or Model instance directly
-            model_input = model 
+            model_input = model
 
         # Validate planning interval
         if planning_interval == 1:
@@ -61,9 +66,10 @@ class MultistepAgent(Agent[None, T]):
             from pydantic_ai.usage import UsageLimits
             kwargs['usage_limits'] = UsageLimits(request_limit=request_limit)
         
-        # Initialize base agent - IT handles resolving model_input to self.model
+        # Initialize base agent - Pass result_type directly
+        # Also pass result_tool_name/description if provided
         super().__init__(
-            model=model_input, 
+            model=model_input,
             result_type=result_type,
             tools=tools or [],
             system_prompt=system_prompt or MULTISTEP_AGENT_SYSTEM_PROMPT,
@@ -83,7 +89,7 @@ class MultistepAgent(Agent[None, T]):
         self.planning_step_count = 0
         self.on_step = on_step
         self.system_prompt = system_prompt or MULTISTEP_AGENT_SYSTEM_PROMPT
-        self.tools = tools or []
+        self.tools = list(self._function_tools.values()) # Get tools registered by super
 
     def add_tool(self, tool: Tool) -> None:
         """Add a single tool to the agent."""
@@ -105,63 +111,63 @@ class MultistepAgent(Agent[None, T]):
 
     def _log_step(self, step: ActionStep) -> None:
         """Log a single step with pretty printing."""
-        # Skip logging for non-reasoning steps
-        if not step.input_messages or not step.input_messages[-1].content:
-            return
-            
-        # Format the step data in a more readable way
-        thought = step.input_messages[-1].content
-        
-        # Only include non-empty tool calls and outputs
-        action_data = {}
-        if step.tool_calls:
-            action_data["tool_calls"] = step.tool_calls
-        if step.tool_outputs:
-            action_data["tool_outputs"] = step.tool_outputs
-            
-        # Format the step data with clear boundaries
+        # Get thought from the reconstructed input message
+        thought = step.input_messages[0].content if step.input_messages else "No thought recorded."
+
         formatted_data = []
-        formatted_data.append("\n" + "=" * 80)  # Step boundary
-        formatted_data.append(f"Step {self.step_count}")  # Use normal step count
-        formatted_data.append("=" * 80)  # Step boundary
-        
-        if thought:
-            formatted_data.append("\nThought:")
-            formatted_data.append("-" * 40)  # Thought boundary
-            formatted_data.append(thought.strip())
-            formatted_data.append("-" * 40)  # Thought boundary
-        
-        if action_data:
+        formatted_data.append("\n" + "=" * 80)
+        formatted_data.append(f"Step {self.step_count}")
+        formatted_data.append("=" * 80)
+
+        formatted_data.append("\nThought:")
+        formatted_data.append("-" * 40)
+        formatted_data.append(thought.strip())
+        formatted_data.append("-" * 40)
+
+        if step.tool_calls:
             formatted_data.append("\nAction:")
-            formatted_data.append("-" * 40)  # Action boundary
-            # Format tool calls in a more readable way
-            for tool_call in action_data.get("tool_calls", []):
-                formatted_data.append(f"Tool: {tool_call.get('name', 'unknown')}")
-                formatted_data.append(f"Arguments: {json.dumps(tool_call.get('args', {}), indent=2)}")
-            formatted_data.append("-" * 40)  # Action boundary
-        
-        # Check if any tool output associated with this step indicates an error
-        has_error = any(out.get('is_error', False) for out in step.tool_outputs) if step.tool_outputs else False
-        
-        if step.observations:
+            formatted_data.append("-" * 40)
+            for tool_call in step.tool_calls:
+                tool_name = tool_call.get('name', 'unknown')
+                args = tool_call.get('args', {})
+                # Format args as key=value string pairs
+                args_str = ", ".join(f"{k}={v!r}" for k, v in args.items())
+                formatted_data.append(f"  Tool: {tool_name}({args_str})")
+            formatted_data.append("-" * 40)
+
+        # Use the detailed tool_outputs list from the reconstructed step
+        if step.tool_outputs:
             formatted_data.append("\nObservation:")
-            formatted_data.append("-" * 40)  # Observation boundary
-            if has_error:
-                formatted_data.append(f"ERROR: {step.observations.strip()}") # Prepend ERROR if flagged
-            else:
-                formatted_data.append(step.observations.strip())
-            formatted_data.append("-" * 40)  # Observation boundary
-        
-        formatted_data.append("=" * 80)  # Step boundary
-        
+            formatted_data.append("-" * 40)
+            for output in step.tool_outputs:
+                tool_name = output.get('name', 'unknown')
+                output_content = output.get('output', 'N/A')
+                is_error = output.get('is_error', False)
+                # Limit output length for cleaner logs
+                output_content_str = str(output_content).strip()
+                max_len = 200
+                if len(output_content_str) > max_len:
+                    output_content_str = output_content_str[:max_len] + "..."
+
+                if is_error:
+                    formatted_data.append(f"  Tool {tool_name} ERROR: {output_content_str}")
+                else:
+                    formatted_data.append(f"  Tool {tool_name} OK: {output_content_str}")
+            formatted_data.append("-" * 40)
+        elif step.observations and step.observations != "No tool outputs.": # Fallback for safety
+             formatted_data.append("\nObservation:")
+             formatted_data.append("-" * 40)
+             formatted_data.append(step.observations.strip()[:200] + ("..." if len(step.observations.strip()) > 200 else ""))
+             formatted_data.append("-" * 40)
+
+        formatted_data.append("=" * 80)
+
         # Call the step callback if provided
         if self.on_step:
             self.on_step(step)
-        
-        # Only log if this is not a final_result step
-        if not (action_data.get("tool_calls") and 
-                any(tool_call.get("name") == "final_result" for tool_call in action_data["tool_calls"])):
-            self.logger.log_step("Reasoning", "\n".join(formatted_data))
+
+        # Log the formatted step data
+        self.logger.log_step("Reasoning", "\n".join(formatted_data))
 
     def _log_planning_step(self, step: PlanningStep) -> None:
         """Log a planning step with pretty printing."""
@@ -215,6 +221,8 @@ class MultistepAgent(Agent[None, T]):
             # For replanning, we might use a combination of PRE and POST prompts,
             # or just send the combined context to a single replan template if designed that way.
             # Let's use PRE and POST as distinct parts for now.
+            # The PRE part sets up the history, the POST asks for the new plan.
+            # We'll combine them into the user prompt.
             # The PRE part sets up the history, the POST asks for the new plan.
             # We'll combine them into the user prompt.
             template_pre = Template(MULTISTEP_AGENT_PLANNING_UPDATE_PRE)
@@ -392,189 +400,259 @@ class MultistepAgent(Agent[None, T]):
         
         return response
 
+    # <<< Logging Helper Methods >>>
+    def _log_user_prompt_node(self, node: UserPromptNode) -> None:
+        """Logs information from a UserPromptNode."""
+        log_lines = []
+        log_lines.append("\n--- User Prompt Node ---")
+        log_lines.append(f"Processing Prompt: {str(node.user_prompt)[:100]}...")
+        log_lines.append("------------------------")
+        self.logger.log_step("Input Node", "\n".join(log_lines))
+
+    def _log_initial_model_request_node(self, node: ModelRequestNode) -> None:
+        """Logs information for an initial/intermediate ModelRequestNode."""
+        log_lines = []
+        log_lines.append("\n--- Model Request Node (Initial/Intermediate) ---")
+        log_lines.append("Sending request to LLM with parts:")
+        if hasattr(node.request, 'parts'):
+            for i, part in enumerate(node.request.parts):
+                part_content_str = str(getattr(part, 'content', '(No Content)'))[:150]
+                if len(str(getattr(part, 'content', ''))) > 150: part_content_str += "..."
+                log_lines.append(f"  Part {i+1}: {type(part).__name__} - Content: {part_content_str}")
+        else:
+            req_str = str(node.request)[:200] + ("..." if len(str(node.request)) > 200 else "")
+            log_lines.append(f"  Request (no parts attr): {req_str}")
+        log_lines.append("---------------------------------------------")
+        self.logger.log_step("LLM Request Node", "\n".join(log_lines))
+
+    def _log_call_tools_node(self, node: CallToolsNode) -> None:
+        """Logs information from a CallToolsNode (LLM response with thought/actions)."""
+        log_lines = []
+        log_lines.append("\n--- Call Tools Node (LLM Response Received) ---")
+        thought = ""
+        actions = [] # Formatted action strings
+        if hasattr(node.model_response, 'parts'):
+            for part in node.model_response.parts:
+                if isinstance(part, pydantic_ai_messages.TextPart):
+                    thought += part.content + "\n"
+                elif isinstance(part, pydantic_ai_messages.ToolCallPart):
+                    # Logic to format tool calls
+                    tool_name = part.tool_name
+                    args_data = part.args
+                    parsed_dict_args = None
+                    raw_args_fallback = None
+
+                    if isinstance(args_data, str):
+                        try:
+                            parsed = json.loads(args_data)
+                            if isinstance(parsed, dict):
+                                parsed_dict_args = parsed
+                            else:
+                                raw_args_fallback = repr(parsed)
+                        except json.JSONDecodeError:
+                            raw_args_fallback = repr(args_data)
+                    elif isinstance(args_data, dict):
+                        parsed_dict_args = args_data
+                    else:
+                        raw_args_fallback = repr(args_data)
+                    
+                    actions.append("  Tool Call:")
+                    actions.append(f"    Tool Name: {tool_name}")
+                    actions.append("    Args:")
+                    if parsed_dict_args is not None:
+                        if parsed_dict_args:
+                            for k, v in parsed_dict_args.items():
+                                actions.append(f"      {k}: {v!r}") 
+                        else:
+                            actions.append("      (No arguments)")
+                    else:
+                        actions.append(f"      (Non-dict args): {raw_args_fallback}")
+        
+        log_lines.append("LLM Thought:")
+        log_lines.append("-"*20)
+        log_lines.append(thought.strip() or "(No explicit thought text)")
+        log_lines.append("-"*20)
+        
+        if actions:
+            log_lines.extend(actions)
+            
+        log_lines.append("---------------------------------------------")
+        self.logger.log_step("LLM Response Node", "\n".join(log_lines))
+
+    def _log_end_node(self, node: End) -> None:
+        """Logs information from the End node."""
+        self.logger.log_step("End","")
+
+    # <<< Keep existing helper >>>
+    async def _reconstruct_and_log_action_step(
+        self,
+        tool_return_request: pydantic_ai_messages.ModelRequest,
+        assistant_response: pydantic_ai_messages.ModelResponse
+    ) -> Optional[ActionStep]:
+        """Reconstructs, stores, and logs a complete Thought-Action-Observation step."""
+        try:
+            thought = ""
+            if hasattr(assistant_response, 'parts'):
+                for part in assistant_response.parts:
+                    if isinstance(part, pydantic_ai_messages.TextPart):
+                        thought += part.content + "\n"
+                thought = thought.strip() or "(No explicit thought text)"
+
+            tool_calls = []
+            if hasattr(assistant_response, 'parts'):
+                for part in assistant_response.parts:
+                    if isinstance(part, pydantic_ai_messages.ToolCallPart):
+                        tool_name = part.tool_name
+                        args_data = part.args
+                        parsed_dict_args = None
+                        raw_args_fallback = None
+
+                        if isinstance(args_data, str):
+                            try:
+                                parsed = json.loads(args_data)
+                                if isinstance(parsed, dict):
+                                    parsed_dict_args = parsed
+                                else:
+                                    raw_args_fallback = repr(parsed)
+                            except json.JSONDecodeError:
+                                raw_args_fallback = repr(args_data)
+                        elif isinstance(args_data, dict):
+                            parsed_dict_args = args_data
+                        else:
+                            raw_args_fallback = repr(args_data)
+                        
+                        tool_calls.append({
+                            'name': tool_name, 
+                            'args': parsed_dict_args if parsed_dict_args is not None else { 'raw_args_fallback': raw_args_fallback },
+                            'id': part.tool_call_id
+                        })
+
+            tool_outputs = []
+            observations_list = []
+            if hasattr(tool_return_request, 'parts'):
+                for part in tool_return_request.parts:
+                    if isinstance(part, pydantic_ai_messages.ToolReturnPart):
+                            output_content = str(part.content)
+                            output_data = {'name': part.tool_name, 'output': output_content}
+                            # --- Add immediate logging here ---
+                            #self.logger.log_action({"action": "tool_result", "tool_name": part.tool_name, "output": output_content})
+                            # --- End immediate logging ---
+                            tool_outputs.append(output_data)
+                            status = "OK"
+                            observations_list.append(f"Tool {part.tool_name} {status}: {output_content}")
+            
+            input_messages_for_log = [Message(role=MessageRole.ASSISTANT, content=thought)]
+
+            step = ActionStep(
+                input_messages=input_messages_for_log,
+                output_messages=[Message(role=MessageRole.ASSISTANT, content=str(assistant_response))],
+                tool_calls=tool_calls,
+                tool_outputs=tool_outputs,
+                observations="\n".join(observations_list) or "No tool outputs.",
+                error=None 
+            )
+
+            self.step_count += 1
+            self.memory.add_step(step)
+            self._log_step(step) # Log the reconstructed step (uses its own detailed formatting)
+            return step
+        
+        except Exception as log_err:
+            self.logger.error(f"Error during T-A-O step reconstruction/logging: {log_err}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return None
+
     async def run(self, task: str, **kwargs) -> T:
-        """Run the agent with the given task."""
+        """Run the agent with the given task, relying on base agent for final result."""
+        # Log agent settings at the start of the run
+        # Access model name safely
+        model_name = "N/A"
+        if hasattr(self.model, 'model_name'): # Check if attribute exists
+            model_name = self.model.model_name
+        elif hasattr(self.model, 'model'): # Fallback for potential different naming
+             model_name = self.model.model
+        
+        # Format settings for info logging
+        settings_info = (
+            f"Starting agent run.\n" 
+            f"  Task: {task}\n"
+            f"  Model: {model_name}\n"
+            f"  Planning Interval: {self.planning_interval}\n"
+            f"  Max Steps: {self.max_steps}\n"
+            f"  Tools: {[tool.name for tool in self.tools]}"
+        )
+        # Log using logger.info
+        self.logger.info(settings_info)
+        
         # Reset counters
         self.step_count = 0
         self.planning_step_count = 0
-        final_result = None
-        current_step = None
-        
+        current_step_logged = False # Flag to avoid double logging within loop
+
         try:
+            # Use the base agent's iterator
             async with super().iter(task, **kwargs) as agent_run:
                 # Initial planning
                 if self.planning_prompt is not None:
-                    planning_step = await self._create_planning_step(task, is_first_step=True) # No context needed
+                    planning_step = await self._create_planning_step(task, is_first_step=True)
                     self.memory.add_step(planning_step)
-                    self.planning_step_count += 1
+                    # planning_step_count incremented in _create_planning_step
                 
                 async for node in agent_run:
-                    if Agent.is_model_request_node(node):
-                        # Process model request
-                        if hasattr(node.request, 'parts'):
-                            # Create new step if needed
-                            if not current_step:
-                                current_step = ActionStep(
-                                    input_messages=[],
-                                    output_messages=[],
-                                    tool_calls=[],
-                                    tool_outputs=[]
+                    current_step_logged = False # Reset flag for each node
+
+                    # --- Call Logging Helpers Based on Node Type ---
+                    if Agent.is_user_prompt_node(node):
+                        self._log_user_prompt_node(node)
+
+                    elif Agent.is_model_request_node(node):
+                        if hasattr(node.request, 'parts') and \
+                           any(isinstance(part, pydantic_ai_messages.ToolReturnPart) for part in node.request.parts):
+                            # Handle T-A-O logging via the other helper
+                            history = agent_run.ctx.state.message_history
+                            if history and isinstance(history[-1], pydantic_ai_messages.ModelResponse):
+                                reconstructed_step = await self._reconstruct_and_log_action_step(
+                                    node.request, 
+                                    history[-1]
                                 )
-                            
-                            for part in node.request.parts:
-                                if part.part_kind == 'tool-return':
-                                    # --- Graceful Tool Error Handling ---
-                                    tool_name = part.tool_name
-                                    tool_output_content = part.content
-                                    is_error = False
-                                    error_message = ""
+                                if reconstructed_step:
+                                    current_step_logged = True
+                        else:
+                            # Log initial/intermediate request via its helper
+                            self._log_initial_model_request_node(node)
 
-                                    # Check for error indication (adapt patterns as needed)
-                                    if isinstance(tool_output_content, str) and (
-                                        tool_output_content.lower().startswith("error:") or
-                                        "exception:" in tool_output_content.lower() or
-                                        "failed to run tool" in tool_output_content.lower() # Common patterns
-                                    ):
-                                        is_error = True
-                                        error_message = tool_output_content
-                                        self.logger.warning(f"Tool '{tool_name}' execution failed: {error_message}")
-                                    
-                                    # Add tool output/error to current step
-                                    current_step.tool_outputs.append({
-                                        'name': tool_name,
-                                        'output': tool_output_content,
-                                        'is_error': is_error  # Flag indicating if this output is an error
-                                    })
-                                    
-                                    # Initialize observations if it's the first tool return in this step
-                                    if current_step.observations is None:
-                                        current_step.observations = ""
-                                    else:
-                                        # Add a newline separator if observations already exist
-                                        current_step.observations += "\n"
-                                        
-                                    # Update observations, aggregating results from multiple tools
-                                    observation_prefix = f"{tool_name}: "
-                                    if is_error:
-                                        observation_prefix += "ERROR: "
-                                    current_step.observations += observation_prefix + str(tool_output_content)
-
-                                    # Log step and add to memory when all expected outputs are received
-                                    if len(current_step.tool_outputs) == len(current_step.tool_calls):
-                                        self._log_step(current_step)
-                                        # Add step to memory *after* logging and potential error update
-                                        self.memory.add_step(current_step) 
-                                        self.step_count += 1  # Increment normal step count
-
-                                        # --- Replanning Check --- MOVE THE BLOCK HERE
-                                        if (self.planning_interval is not None and 
-                                            self.planning_prompt is not None and 
-                                            self.step_count > 0 and 
-                                            self.step_count % self.planning_interval == 0):
-                                            # self.logger.info(f"Replanning triggered at step {self.step_count}") # Error: AgentLogger has no 'info'
-                                            #self.logger.log_action({"action": "replanning_trigger", "step": self.step_count})
-                                            planning_step = await self._create_planning_step(task, is_first_step=False)
-                                            self.memory.add_step(planning_step)
-                                            # self.planning_step_count += 1 # Already incremented in _create_planning_step
-
-                                        # Create new step for next operation, indicating previous outcome
-                                        next_step_content = ""
-                                        if is_error:
-                                            next_step_content = f"Tool '{tool_name}' failed. Error: {error_message}. Continuing process."
-                                        else:
-                                            # Truncate long outputs for brevity in the next step's input message
-                                            output_summary = (str(tool_output_content)[:100] + '...') if len(str(tool_output_content)) > 100 else str(tool_output_content)
-                                            next_step_content = f"Tool '{tool_name}' executed. Output: {output_summary}"
-
-                                        current_step = ActionStep(
-                                            input_messages=[Message(
-                                                role=MessageRole.ASSISTANT,
-                                                content=next_step_content
-                                            )],
-                                            output_messages=[],
-                                            tool_calls=[],
-                                            tool_outputs=[]
-                                        )
-                                elif part.part_kind == 'user-prompt':
-                                    # Create new step for user input (if not already processing a step)
-                                    # Ensure we don't overwrite a step that's waiting for tool returns
-                                    if not current_step or not current_step.tool_calls or len(current_step.tool_outputs) == len(current_step.tool_calls):
-                                        current_step = ActionStep(
-                                            input_messages=[Message(
-                                                role=MessageRole.USER,
-                                                content=part.content
-                                            )],
-                                            output_messages=[],
-                                            tool_calls=[],
-                                            tool_outputs=[]
-                                        )
                     elif Agent.is_call_tools_node(node):
-                        # Process tool calls
-                        if hasattr(node, 'model_response') and hasattr(node.model_response, 'parts'):
-                            # Create new step if needed (redundant check, consider removing if current_step always exists here)
-                            if not current_step:
-                                current_step = ActionStep(
-                                    input_messages=[], output_messages=[], tool_calls=[], tool_outputs=[]
-                                )
-                            
-                            # Process all tool calls in this response
-                            for part in node.model_response.parts:
-                                if hasattr(part, 'tool_name'):
-                                    args = json.loads(part.args) if hasattr(part, 'args') and isinstance(part.args, str) else (part.args if hasattr(part, 'args') else {})
-                                    tool_name = part.tool_name
-                                    
-                                    if tool_name == 'final_answer':
-                                        # Find the actual final_answer tool function
-                                        final_answer_tool = next((t for t in self.tools if t.name == 'final_answer'), None)
-                                        if final_answer_tool and callable(final_answer_tool.function):
-                                            try:
-                                                # Call the function to get the correctly typed result
-                                                final_result = final_answer_tool.function(**args)
-                                            except Exception as tool_exec_error:
-                                                self.logger.error(f"Error executing final_answer tool function: {tool_exec_error}")
-                                                # Fallback or raise error, maybe return error dict?
-                                                final_result = {"success": False, "error": f"Failed to format final answer: {tool_exec_error}"}
-                                        else:
-                                            # Tool function not found or not callable, fallback to raw args
-                                            self.logger.warning("Could not find or call the 'final_answer' tool function. Returning raw arguments.")
-                                            final_result = args
-                                    elif tool_name == 'final_result': # Keep handling for potential direct final_result calls
-                                        if final_result:
-                                            return final_result
-                                        else:
-                                            # This case might occur if the model calls final_result directly without final_answer
-                                            final_result = args # Assume args contain the final result structure
-                                    else:
-                                        # Append other tool calls to the current step
-                                        current_step.tool_calls.append({
-                                            'name': tool_name,
-                                            'args': args
-                                        })
-                                        
-                                        # Add thought process if available (redundant check, consider removing)
-                                        if hasattr(part, 'content') and part.content:
-                                            if not current_step.input_messages or current_step.input_messages[-1].content != part.content:
-                                                current_step.input_messages.append(Message(
-                                                    role=MessageRole.ASSISTANT,
-                                                    content=part.content
-                                                ))
+                         # Log LLM response/actions via its helper
+                        self._log_call_tools_node(node)
+
                     elif Agent.is_end_node(node):
-                        # Return the final result if available
-                        # This might be set by the final_answer tool call processing above
-                        if final_result is not None:
-                            return final_result
-                        # Or, if PydanticAI produced a final result directly (e.g., simple tasks without tool use)
-                        elif hasattr(node, 'result') and node.result is not None:
-                           return node.result # Return PydanticAI's direct result
-            
-            # If loop finishes without returning, check if final_result was set
-            if final_result is not None:
-                return final_result
-            
-            # Fallback if no result was ever determined (should ideally not happen in successful runs)
-            self.logger.warning("Agent run finished without producing a final result.")
-            return {"success": False, "error": "Agent finished without result."}
+                        # Log final result via its helper
+                        self._log_end_node(node)
+                    
+                    # else: 
+                    #    # Handle potential unknown node types if necessary
+                    #    pass
+
+                    # --- Replanning Check (Uses updated self.step_count) ---
+                    if (self.planning_interval is not None and
+                        self.planning_prompt is not None and
+                        self.step_count > 0 and
+                        self.step_count % self.planning_interval == 0 and
+                        not current_step_logged):
+                        planning_step = await self._create_planning_step(task, is_first_step=False)
+                        self.memory.add_step(planning_step)
+
+                # --- Get Final Result (Now only used for return value) ---
+                if agent_run.result:
+                    return agent_run.result.data
+                else:
+                    self.logger.error("Agent run finished via super().iter() but no result was found.")
+                    raise RuntimeError("Agent finished without result.")
             
         except Exception as e:
             self.logger.error(f"Error in run: {str(e)}")
+            # Consider adding traceback logging
+            import traceback
+            self.logger.error(traceback.format_exc())
             raise 

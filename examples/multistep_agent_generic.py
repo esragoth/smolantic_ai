@@ -1,32 +1,36 @@
+from dotenv import load_dotenv
+
+# Load environment variables from .env file FIRST
+dotenv_loaded = load_dotenv()
+
+import os # Import os here for debugging
+
+# Load environment variables from .env file FIRST - Removed, relying on pydantic-settings
+# dotenv_loaded = load_dotenv()
+
 import asyncio
 import os
 from pydantic import BaseModel
 from pydantic_ai import Tool
+from pydantic_ai.models import Model
+from pydantic_ai.settings import ModelSettings
 from smolantic_ai.multistep_agent import MultistepAgent
 from smolantic_ai.prebuilt_tools import (
     get_weather_tool,
     search_google_tool,
     timezone_tool,
 )
-from dotenv import load_dotenv
+from smolantic_ai.config import settings as config
 
-# Load environment variables from .env file
-load_dotenv()
+# --- DEBUG: Print loaded model config ---
+print(f"DEBUG: Loaded Model Provider: {config.model_provider}")
+print(f"DEBUG: Loaded Model Name: {config.model_name}")
+# --- END DEBUG ---
 
-# Define a simple result model using a Tool for the final answer
+# Re-add the FinalAnswer class definition
 class FinalAnswer(BaseModel):
-    summary: str
+     summary_text: str
 
-def final_answer(summary: str) -> FinalAnswer:
-    """Return the final summary or answer to the user."""
-    return FinalAnswer(summary=summary)
-
-# Define the custom final answer tool for this example
-final_answer_tool = Tool(
-    name="final_answer",
-    description="Provide the final summary or answer when the task is complete.",
-    function=final_answer,
-)
 
 async def main():
     # Define the specific tools the agent needs for this task
@@ -34,24 +38,17 @@ async def main():
         get_weather_tool,
         timezone_tool,
         search_google_tool,
-        final_answer_tool, # Use the custom final answer tool
     ]
 
-    # Ensure the necessary API key for the LLM is set in the environment
-    if not os.getenv("OPENAI_API_KEY"):
-        print("Error: OPENAI_API_KEY environment variable not set.")
-        print("Please set it in your .env file or environment.")
-        return
-
-    # Instantiate the MultistepAgent
-    agent = MultistepAgent[
-        FinalAnswer # Specify the expected final result type
-    ](
+   
+    # Instantiate the MultistepAgent with FinalAnswer as result type
+    agent = MultistepAgent[FinalAnswer]( # Use FinalAnswer as result type
         tools=tools,
+        result_type=FinalAnswer,
         # You can optionally specify the model, planning interval, max steps, etc.
-        # model="openai:gpt-4-turbo",
+        model=config.model_string, 
         planning_interval=3, 
-        max_steps=15
+        max_steps=15,
     )
 
     # Define the task for the agent
@@ -66,9 +63,9 @@ async def main():
     # Run the agent
     try:
         # The agent will use planning and the provided tools to solve the task
-        result: FinalAnswer = await agent.run(task)
+        result: FinalAnswer = await agent.run(task) # Result type is still FinalAnswer
         print(f"\n--- Agent Finished ---")
-        print(f"Final Summary:\n{result.summary}")
+        print(f"Final Summary:\n{result.summary_text}") # Access the renamed field
         print("----------------------")
 
     except Exception as e:
