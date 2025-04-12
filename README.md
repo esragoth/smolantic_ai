@@ -162,4 +162,4 @@ pytest
 
 ## License
 
-[Your chosen license] - *Please specify which license you want to use (e.g., MIT, Apache 2.0)* 
+MIT License 
