@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # Model configurations
     multistep_model: ModelConfig = Field(
-        default=ModelConfig(provider="openai", model_name="gpt-4"),
+        default=ModelConfig(provider="openai", model_name="gpt-4o"),
         description="Model configuration for MultistepAgent"
     )
     tool_calling_model: ModelConfig = Field(
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
         description="Model configuration for ToolCallingAgent"
     )
     code_model: ModelConfig = Field(
-        default=ModelConfig(provider="gemini", model_name="gemini-pro"),
+        default=ModelConfig(provider="openai", model_name="gpt-4o"),
         description="Model configuration for CodeAgent"
     )
     
