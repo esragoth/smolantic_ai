@@ -4,7 +4,9 @@ from pydantic import BaseModel
 from pydantic_ai import Tool
 from smolantic_ai.multistep_agent import MultistepAgent
 from smolantic_ai.prebuilt_tools import (
-    get_weather, get_time_in_timezone, search_google, read_webpage
+    get_weather_tool,
+    search_google_tool,
+    timezone_tool,
 )
 from dotenv import load_dotenv
 
@@ -19,14 +21,20 @@ def final_answer(summary: str) -> FinalAnswer:
     """Return the final summary or answer to the user."""
     return FinalAnswer(summary=summary)
 
+# Define the custom final answer tool for this example
+final_answer_tool = Tool(
+    name="final_answer",
+    description="Provide the final summary or answer when the task is complete.",
+    function=final_answer,
+)
+
 async def main():
-    # Define the tools the agent can use
+    # Define the specific tools the agent needs for this task
     tools = [
-        Tool(name="get_weather", function=get_weather, description="Get the current weather for a specific location (city name). Optionally specify celsius=True for Celsius."),
-        Tool(name="get_time_in_timezone", function=get_time_in_timezone, description="Get the current time for a location specified as 'Region/City' (e.g., 'Europe/London')."),
-        Tool(name="search_google", function=search_google, description="Perform a Google search for a query. Requires country code (e.g., 'us', 'gb'). Can optionally specify language ('en') and location."),
-        Tool(name="read_webpage", function=read_webpage, description="Read the text content of a given webpage URL using Jina Reader."),
-        Tool(name="final_answer", function=final_answer, description="Provide the final summary or answer when the task is complete.")
+        get_weather_tool,
+        timezone_tool,
+        search_google_tool,
+        final_answer_tool, # Use the custom final answer tool
     ]
 
     # Ensure the necessary API key for the LLM is set in the environment

@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     google_api_key: Optional[str] = None
     api_ninja_api_key: Optional[str] = None
+    weatherapi_api_key: Optional[str] = None # Key for WeatherAPI.com
+    ipgeolocation_api_key: Optional[str] = None # Key for ipgeolocation.io
 
 # Global settings instance
 settings = Settings() 

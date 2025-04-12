@@ -12,39 +12,85 @@ from .config import settings
 # Load environment variables from .env file if present
 load_dotenv()
 
-def get_weather(location: str, celsius: Optional[bool] = False) -> str:
+def get_weather(query: str, aqi: Optional[str] = "no") -> str:
     """
-    Get the current weather at the given location using the WeatherStack API.
+    Get the current weather for a given location using WeatherAPI.com.
 
     Args:
-        location: The location (city name).
-        celsius: Whether to return the temperature in Celsius (default is False, which returns Fahrenheit).
+        query: Location query (e.g., city name, zip code, lat,lon).
+        aqi: Include Air Quality Index data? "yes" or "no" (default: "no").
 
     Returns:
-        A string describing the current weather at the location.
+        A string describing the current weather at the location, or an error message.
     """
-    api_key = "your_api_key"  # Replace with your API key from https://weatherstack.com/
-    units = "m" if celsius else "f"  # 'm' for Celsius, 'f' for Fahrenheit
+    api_key = settings.weatherapi_api_key
+    if not api_key:
+        return "Error: WEATHERAPI_API_KEY not found in settings. Please add it to your .env file."
 
-    url = f"http://api.weatherstack.com/current?access_key={api_key}&query={location}&units={units}"
+    base_url = "http://api.weatherapi.com/v1/current.json"
+    params = {
+        "key": api_key,
+        "q": query,
+        "aqi": aqi
+    }
 
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for HTTP errors
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
 
         data = response.json()
 
-        if data.get("error"):  # Check if there's an error in the response
-            return f"Error: {data['error'].get('info', 'Unable to fetch weather data.')}"
+        # Check for API-specific errors within the response
+        if "error" in data:
+            error_message = data["error"].get("message", "Unknown API error")
+            return f"API Error: {error_message}"
 
-        weather = data["current"]["weather_descriptions"][0]
-        temp = data["current"]["temperature"]
-        temp_unit = "°C" if celsius else "°F"
+        # Extract location and current weather data
+        location = data.get("location", {})
+        current = data.get("current", {})
 
-        return f"The current weather in {location} is {weather} with a temperature of {temp} {temp_unit}."
+        location_name = location.get("name", "N/A")
+        region = location.get("region", "")
+        country = location.get("country", "")
+        temp_c = current.get("temp_c")
+        temp_f = current.get("temp_f")
+        condition = current.get("condition", {}).get("text", "N/A")
+        wind_kph = current.get("wind_kph")
+        wind_dir = current.get("wind_dir")
+        humidity = current.get("humidity")
+        feelslike_c = current.get("feelslike_c")
+        uv = current.get("uv")
+
+        # Construct the output string
+        full_location = f"{location_name}{f', {region}' if region else ''}{f', {country}' if country else ''}"
+        weather_parts = [f"Current weather in {full_location}:"]
+        if temp_c is not None:
+            weather_parts.append(f"  Temperature: {temp_c}°C ({temp_f}°F)")
+        if feelslike_c is not None:
+            weather_parts.append(f"  Feels Like: {feelslike_c}°C")
+        weather_parts.append(f"  Condition: {condition}")
+        if wind_kph is not None:
+            weather_parts.append(f"  Wind: {wind_kph} kph from {wind_dir}")
+        if humidity is not None:
+            weather_parts.append(f"  Humidity: {humidity}%")
+        if uv is not None:
+            weather_parts.append(f"  UV Index: {uv}")
+
+        # Add AQI data if requested and available
+        if aqi.lower() == "yes" and "air_quality" in current:
+            aqi_data = current["air_quality"]
+            weather_parts.append("  Air Quality:")
+            for key, value in aqi_data.items():
+                weather_parts.append(f"    {key.replace('_', ' ').upper()}: {value:.2f}")
+
+        return "\n".join(weather_parts)
 
     except requests.exceptions.RequestException as e:
         return f"Error fetching weather data: {str(e)}"
+    except json.JSONDecodeError:
+        return "Error: Failed to decode API response."
+    except Exception as e:
+        return f"An unexpected error occurred in get_weather: {str(e)}"
 
 def convert_currency(amount: float, from_currency: str, to_currency: str) -> str:
     """
@@ -121,96 +167,76 @@ def convert_currency(amount: float, from_currency: str, to_currency: str) -> str
         # Catch any other unexpected errors during processing
         return f"An unexpected error occurred during currency conversion: {str(e)}"
 
-def get_timezone_by_city(city: str, state: Optional[str] = None, country: Optional[str] = None) -> str:
+def get_timezone_by_city(location: str) -> str:
     """
-    Fetches the timezone, UTC offset, and local time for a given city using the API Ninjas Timezone API.
+    Fetches the timezone and current time for a given location using the ipgeolocation.io Timezone API.
 
     Args:
-        city: The name of the city.
-        state: The US state (only for US cities).
-        country: The name of the country.
+        location: The location query (e.g., city name, address).
 
     Returns:
         str: A string describing the timezone information or an error message.
     """
-    api_key = settings.api_ninja_api_key
+    api_key = settings.ipgeolocation_api_key
     if not api_key:
-        return "Error: API_NINJA_API_KEY not found in settings."
+        return "Error: IPGEOLOCATION_API_KEY not found in settings. Please add it to your .env file."
 
-    api_url = 'https://api.api-ninjas.com/v1/timezone'
-    params = {"city": city}
-    if state:
-        params["state"] = state
-    if country:
-        params["country"] = country
-
-    headers = {'X-Api-Key': api_key}
+    api_url = 'https://api.ipgeolocation.io/timezone'
+    params = {
+        "apiKey": api_key,
+        "location": location
+    }
 
     try:
-        response = requests.get(api_url, headers=headers, params=params)
+        response = requests.get(api_url, params=params)
         response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
 
         data = response.json()
 
-        if isinstance(data, list): # API returns list on error/no match
-            if not data:
-                return f"Error: No timezone data found for {city}{f', {state}' if state else ''}{f', {country}' if country else ''}."
-            else:
-                # Attempt to get more info if the list contains error details
-                error_detail = data[0].get('error', 'Unknown API error format')
-                return f"API Error: {error_detail}"
-        elif isinstance(data, dict):
-            if "error" in data:
-                 return f"API Error: {data['error']}"
+        # Check for API-specific errors (ipgeolocation seems to use a 'message' field for errors)
+        if "message" in data:
+            return f"API Error: {data['message']}"
 
-            timezone = data.get("timezone")
-            utc_offset = data.get("utc_offset")
-            local_time = data.get("local_time")
-            response_city = data.get("city", city) # Use API's city name if available
+        timezone = data.get("timezone")
+        date_time_txt = data.get("date_time_txt")
+        is_dst = data.get("is_dst")
+        offset = data.get("timezone_offset")
+        offset_dst = data.get("timezone_offset_with_dst")
+        geo = data.get("geo", {})
+        city = geo.get("city", location) # Use resolved city name if available
+        country = geo.get("country_name", "")
 
-            if not timezone:
-                return f"Error: Could not determine timezone for {response_city}."
+        if not timezone or not date_time_txt:
+            return f"Error: Could not retrieve complete timezone data for {location}."
 
-            return (
-                f"Timezone Information for {response_city.capitalize()}:
-" 
-                f"  Timezone: {timezone}\n"
-                f"  UTC Offset: {utc_offset} seconds\n"
-                f"  Local Time: {local_time}"
-            )
-        else:
-            return f"Error: Unexpected response format from API: {data}"
+        location_display = f"{city}{f', {country}' if country else ''}"
+        dst_info = f"(DST Active, Offset: {offset_dst})" if is_dst else f"(DST Inactive, Offset: {offset})"
+
+        return (
+            f"Timezone Information for {location_display}:\n"
+            f"  Timezone: {timezone}\n"
+            f"  Current Time: {date_time_txt}\n"
+            f"  DST Status: {dst_info}"
+        )
 
     except requests.exceptions.RequestException as e:
-        return f"Error fetching timezone data: {str(e)}"
+        # Handle HTTP request errors
+        # Check if status code is 4xx/5xx which might indicate API key/param issues
+        status_code = e.response.status_code if e.response else "N/A"
+        error_detail = str(e)
+        if e.response is not None:
+            try:
+                # Try to get more specific error from response body
+                error_json = e.response.json()
+                if "message" in error_json:
+                    error_detail = f"{status_code} - {error_json['message']}"
+            except json.JSONDecodeError:
+                pass # Stick with the default requests error
+        return f"Error fetching timezone data: {error_detail}"
     except json.JSONDecodeError:
         return "Error: Failed to decode API response."
     except Exception as e:
-        return f"An unexpected error occurred: {str(e)}"
-
-def get_time_in_timezone(location: str) -> str:
-    """
-    Fetches the current time for a given location using the World Time API.
-    Args:
-        location: The location for which to fetch the current time, formatted as 'Region/City'.
-    Returns:
-        str: A string indicating the current time in the specified location, or an error message if the request fails.
-    Raises:
-        requests.exceptions.RequestException: If there is an issue with the HTTP request.
-    """
-    url = f"http://worldtimeapi.org/api/timezone/{location}.json"
-
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-
-        data = response.json()
-        current_time = data["datetime"]
-
-        return f"The current time in {location} is {current_time}."
-
-    except requests.exceptions.RequestException as e:
-        return f"Error fetching time data: {str(e)}"
+        return f"An unexpected error occurred in get_timezone_by_city: {str(e)}"
 
 def search_google(query: str, location: Optional[str] = None, language: str = "en", country: str = "us") -> str:
     """
@@ -378,7 +404,7 @@ def divide(a: float, b: float) -> float:
 
 get_weather_tool = Tool(
     name="get_weather",
-    description="Get the current weather at the given location using the WeatherStack API.",
+    description="Get the current weather for a location (city, zip, lat/lon) using WeatherAPI.com. Optionally include Air Quality Index (aqi='yes').",
     function=get_weather
 )
 
@@ -390,14 +416,8 @@ convert_currency_tool = Tool(
 
 timezone_tool = Tool(
     name="get_timezone_by_city",
-    description="Gets the timezone, UTC offset, and current local time for a specific city (optionally state/country) using the API Ninjas Timezone API.",
+    description="Gets the timezone, current time, and DST status for a specific location (city, address) using the ipgeolocation.io Timezone API.",
     function=get_timezone_by_city
-)
-
-get_time_in_timezone_tool = Tool(
-    name="get_time_in_timezone",
-    description="Fetches the current time for a given location (Region/City) using the World Time API.",
-    function=get_time_in_timezone
 )
 
 search_google_tool = Tool(
@@ -441,7 +461,6 @@ prebuilt_tools_list = [
     get_weather_tool,
     convert_currency_tool,
     timezone_tool,
-    get_time_in_timezone_tool,
     search_google_tool,
     read_webpage_tool,
     add_tool,
@@ -451,21 +470,10 @@ prebuilt_tools_list = [
 ]
 
 __all__ = [
-    "get_weather",
-    "convert_currency",
-    "get_timezone_by_city",
-    "get_time_in_timezone",
-    "search_google",
-    "format_search_results_to_markdown",
-    "read_webpage",
-    "add",
-    "subtract",
-    "multiply",
-    "divide",
+    # Only export the Tool objects and the list
     "get_weather_tool",
     "convert_currency_tool",
     "timezone_tool",
-    "get_time_in_timezone_tool",
     "search_google_tool",
     "read_webpage_tool",
     "add_tool",
