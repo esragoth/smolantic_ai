@@ -534,9 +534,6 @@ class MultistepAgent(Agent[None, T]):
                     if isinstance(part, pydantic_ai_messages.ToolReturnPart):
                             output_content = str(part.content)
                             output_data = {'name': part.tool_name, 'output': output_content}
-                            # --- Add immediate logging here ---
-                            #self.logger.log_action({"action": "tool_result", "tool_name": part.tool_name, "output": output_content})
-                            # --- End immediate logging ---
                             tool_outputs.append(output_data)
                             status = "OK"
                             observations_list.append(f"Tool {part.tool_name} {status}: {output_content}")
