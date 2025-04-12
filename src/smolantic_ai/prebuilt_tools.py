@@ -105,6 +105,7 @@ def convert_currency(amount: float, from_currency: str, to_currency: str) -> str
     Returns:
         str: A string describing the converted amount in the target currency, or an error message if the conversion fails.
     """
+    # Use os.getenv as originally implemented
     api_key = os.getenv("EXCHANGERATE_API_KEY")
     if not api_key:
         return "Error: EXCHANGERATE_API_KEY environment variable not set."
@@ -259,8 +260,10 @@ def search_google(query: str, location: Optional[str] = None, language: str = "e
         # Disable SSL verification
         ssl._create_default_https_context = ssl._create_unverified_context
         
-        # Configure proxy with authentication
-        proxy_url = 'http://brd-customer-hl_10d3d7a9-zone-serp_api2:7edm2leyjmgg@brd.superproxy.io:33335'
+        # Load proxy URL from environment variables
+        proxy_url = os.getenv("BRIGHTDATA_PROXY_URL")
+        if not proxy_url:
+            return "Error: BRIGHTDATA_PROXY_URL environment variable not set. Please add it to your .env file."
         
         # Build URL opener with proxy
         opener = urllib.request.build_opener(
@@ -374,10 +377,17 @@ def read_webpage(query: str) -> str:
     """
     try:
         jina_url = f'https://r.jina.ai/{query}'
+        
+        # Load Jina API key from environment variables
+        api_key = os.getenv("JINA_API_KEY")
+        if not api_key:
+            return "Error: JINA_API_KEY environment variable not set. Please add it to your .env file."
+            
         headers = {
-            'Authorization': 'Bearer jina_2973abd594684126b8d3ca2efb04408aKbPL-FF1UedPb5EUwdb5XXUWo8OF'
+            'Authorization': f'Bearer {api_key}'
         }
         response = requests.get(jina_url, headers=headers)
+        response.raise_for_status() # Raise HTTP errors
         return response.text
     except Exception as e:
         return f"Error reading webpage: {str(e)}"

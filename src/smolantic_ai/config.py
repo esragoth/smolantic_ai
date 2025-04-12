@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     api_ninja_api_key: Optional[str] = None
     weatherapi_api_key: Optional[str] = None # Key for WeatherAPI.com
     ipgeolocation_api_key: Optional[str] = None # Key for ipgeolocation.io
+    # Removing tool specific keys/URLs from settings
+    # exchangerate_api_key: Optional[str] = None
+    # jina_api_key: Optional[str] = None
+    # brightdata_proxy_url: Optional[str] = None
 
 # Global settings instance
 settings = Settings() 
