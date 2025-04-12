@@ -1,3 +1,4 @@
+# TODO: Verify compatibility and integration with the refactored MultistepAgent base class.
 from typing import Any, Optional, List
 from pydantic import BaseModel
 from pydantic_ai import Agent, Tool

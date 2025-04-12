@@ -29,6 +29,9 @@ T = TypeVar('T', bound=BaseModel)
 class MultistepAgent(Agent[None, T]):
     """Base agent specialized for handling multi-step tasks with planning and execution."""
     
+    # TODO: Add support for passing specific model parameters (temperature, top_p, etc.) through __init__ or run.
+    # TODO: Integrate support for managed agents for multi-agent architectures using pydantic-ai built-in functionality.
+
     # The base Agent class provides self.model after initialization
     model: Model 
 
@@ -46,6 +49,8 @@ class MultistepAgent(Agent[None, T]):
         request_limit: Optional[int] = None,
         **kwargs
     ):
+        # TODO: Check compatibility and integration with local models via Ollama.
+        # TODO: Investigate using LiteLLM as an abstraction layer for model interaction.
         
         # Determine the effective model string or instance for super()
         if model is None:
