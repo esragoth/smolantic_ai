@@ -11,3 +11,4 @@ anthropic>=0.18.0  # For Anthropic model support
 google-generativeai>=0.3.0  # For Gemini model support
 asyncio>=3.4.3  # For async/await support 
 jinja2>=3.1.0  # For Jinja2 templating
+requests>=2.20.0 # For making HTTP requests

@@ -6,6 +6,8 @@ import urllib.request
 import ssl
 import os
 from dotenv import load_dotenv
+from pydantic_ai import Tool
+from .config import settings
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -118,6 +120,73 @@ def convert_currency(amount: float, from_currency: str, to_currency: str) -> str
     except Exception as e:
         # Catch any other unexpected errors during processing
         return f"An unexpected error occurred during currency conversion: {str(e)}"
+
+def get_timezone_by_city(city: str, state: Optional[str] = None, country: Optional[str] = None) -> str:
+    """
+    Fetches the timezone, UTC offset, and local time for a given city using the API Ninjas Timezone API.
+
+    Args:
+        city: The name of the city.
+        state: The US state (only for US cities).
+        country: The name of the country.
+
+    Returns:
+        str: A string describing the timezone information or an error message.
+    """
+    api_key = settings.api_ninja_api_key
+    if not api_key:
+        return "Error: API_NINJA_API_KEY not found in settings."
+
+    api_url = 'https://api.api-ninjas.com/v1/timezone'
+    params = {"city": city}
+    if state:
+        params["state"] = state
+    if country:
+        params["country"] = country
+
+    headers = {'X-Api-Key': api_key}
+
+    try:
+        response = requests.get(api_url, headers=headers, params=params)
+        response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
+
+        data = response.json()
+
+        if isinstance(data, list): # API returns list on error/no match
+            if not data:
+                return f"Error: No timezone data found for {city}{f', {state}' if state else ''}{f', {country}' if country else ''}."
+            else:
+                # Attempt to get more info if the list contains error details
+                error_detail = data[0].get('error', 'Unknown API error format')
+                return f"API Error: {error_detail}"
+        elif isinstance(data, dict):
+            if "error" in data:
+                 return f"API Error: {data['error']}"
+
+            timezone = data.get("timezone")
+            utc_offset = data.get("utc_offset")
+            local_time = data.get("local_time")
+            response_city = data.get("city", city) # Use API's city name if available
+
+            if not timezone:
+                return f"Error: Could not determine timezone for {response_city}."
+
+            return (
+                f"Timezone Information for {response_city.capitalize()}:
+" 
+                f"  Timezone: {timezone}\n"
+                f"  UTC Offset: {utc_offset} seconds\n"
+                f"  Local Time: {local_time}"
+            )
+        else:
+            return f"Error: Unexpected response format from API: {data}"
+
+    except requests.exceptions.RequestException as e:
+        return f"Error fetching timezone data: {str(e)}"
+    except json.JSONDecodeError:
+        return "Error: Failed to decode API response."
+    except Exception as e:
+        return f"An unexpected error occurred: {str(e)}"
 
 def get_time_in_timezone(location: str) -> str:
     """
@@ -304,3 +373,104 @@ def divide(a: float, b: float) -> float:
     if b == 0:
         return float('inf') # Or raise an error, depending on desired behavior
     return a / b
+
+# --- Tool Definitions ---
+
+get_weather_tool = Tool(
+    name="get_weather",
+    description="Get the current weather at the given location using the WeatherStack API.",
+    function=get_weather
+)
+
+convert_currency_tool = Tool(
+    name="convert_currency",
+    description="Converts a specified amount from one currency to another using the exchangeratesapi.io API.",
+    function=convert_currency
+)
+
+timezone_tool = Tool(
+    name="get_timezone_by_city",
+    description="Gets the timezone, UTC offset, and current local time for a specific city (optionally state/country) using the API Ninjas Timezone API.",
+    function=get_timezone_by_city
+)
+
+get_time_in_timezone_tool = Tool(
+    name="get_time_in_timezone",
+    description="Fetches the current time for a given location (Region/City) using the World Time API.",
+    function=get_time_in_timezone
+)
+
+search_google_tool = Tool(
+    name="search_google",
+    description="Performs a Google search using Bright Data's SERP API and returns formatted organic results.",
+    function=search_google
+)
+
+read_webpage_tool = Tool(
+    name="read_webpage",
+    description="Reads the text content of a given URL using the Jina Reader API.",
+    function=read_webpage
+)
+
+add_tool = Tool(
+    name="add",
+    description="Calculate the sum of two numbers (a + b).",
+    function=add
+)
+
+subtract_tool = Tool(
+    name="subtract",
+    description="Calculate the difference between two numbers (a - b).",
+    function=subtract
+)
+
+multiply_tool = Tool(
+    name="multiply",
+    description="Calculate the product of two numbers (a * b).",
+    function=multiply
+)
+
+divide_tool = Tool(
+    name="divide",
+    description="Calculate the division of two numbers (a / b). Handles division by zero.",
+    function=divide
+)
+
+# List of all prebuilt tools
+prebuilt_tools_list = [
+    get_weather_tool,
+    convert_currency_tool,
+    timezone_tool,
+    get_time_in_timezone_tool,
+    search_google_tool,
+    read_webpage_tool,
+    add_tool,
+    subtract_tool,
+    multiply_tool,
+    divide_tool,
+]
+
+__all__ = [
+    "get_weather",
+    "convert_currency",
+    "get_timezone_by_city",
+    "get_time_in_timezone",
+    "search_google",
+    "format_search_results_to_markdown",
+    "read_webpage",
+    "add",
+    "subtract",
+    "multiply",
+    "divide",
+    "get_weather_tool",
+    "convert_currency_tool",
+    "timezone_tool",
+    "get_time_in_timezone_tool",
+    "search_google_tool",
+    "read_webpage_tool",
+    "add_tool",
+    "subtract_tool",
+    "multiply_tool",
+    "divide_tool",
+    "prebuilt_tools_list",
+]

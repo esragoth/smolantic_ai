@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     google_api_key: Optional[str] = None
+    api_ninja_api_key: Optional[str] = None
 
 # Global settings instance
 settings = Settings() 
