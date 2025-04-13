@@ -20,6 +20,7 @@ class CodeAgent(MultistepAgent[CodeResult]):
     def __init__(
         self,
         model: Optional[str] = None,
+        tools: Optional[List[Tool]] = None,
         executor_type: str = "local",
         authorized_imports: Optional[List[str]] = None,
         max_print_outputs_length: Optional[int] = None,
@@ -27,23 +28,13 @@ class CodeAgent(MultistepAgent[CodeResult]):
         logger_name: Optional[str] = None,
         **kwargs
     ):
-        # Create the final_answer tool
-        def final_answer(code: str, result: str, explanation: str) -> CodeResult:
-            return CodeResult(code=code, result=result, explanation=explanation)
         
-        tools = [
-            Tool(
-                name="final_answer",
-                function=final_answer,
-                description="Return the final answer with code, result, and explanation"
-            )
-        ]
         
         # Initialize base agent with tools
         super().__init__(
-            model=model or settings.code_model.model_string,
+            model=model or settings.model_provider+":"+settings.model_name,
             result_type=CodeResult,
-            tools=tools,
+            tools=tools or [],
             system_prompt=CODE_AGENT_SYSTEM_PROMPT,
             planning_prompt=CODE_AGENT_PLANNING_INITIAL,
             planning_interval=planning_interval,

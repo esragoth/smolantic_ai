@@ -2,10 +2,9 @@
 SmolAntic AI - A small but powerful AI agent framework
 """
 
-from .agent import ToolCallingAgent, CodeAgent
+from .agent import CodeAgent
 
 __all__ = [
-    "ToolCallingAgent",
     "CodeAgent",
 ]
 
