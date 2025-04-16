@@ -3,11 +3,11 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai import UserPromptNode, ModelRequestNode, CallToolsNode
 from pydantic_ai.models import Model, ModelRequestParameters
-from pydantic_ai.settings import ModelSettings # Import ModelSettings
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.messages import ModelRequest,SystemPromptPart,UserPromptPart
-from pydantic_graph import End # <-- Keep End import
+from pydantic_graph import End
 from .models import Message, MessageRole, ActionStep, AgentMemory, MultistepResult, PlanningStep, TaskStep, FinalAnswerStep
-from .config import settings # Import settings
+from .config import settings_manager
 from .logging import get_logger
 from .prompts import (
     MULTISTEP_AGENT_SYSTEM_PROMPT,
@@ -16,7 +16,7 @@ from .prompts import (
     MULTISTEP_AGENT_PLANNING_UPDATE_POST,
 )
 import json
-from jinja2 import Template # Import Jinja2 Template
+from jinja2 import Template
 from pydantic_ai import messages as pydantic_ai_messages
 
 class PlanningResponse(BaseModel):
@@ -37,7 +37,7 @@ class MultistepAgent(Agent[None, T]):
 
     def __init__(
         self,
-        model: Union[str, Model] = None, # Accept str or Model instance
+        model: Union[str, Model] = None,
         tools: Optional[List[Tool]] = None,
         planning_interval: Optional[int] = None,
         planning_prompt: Optional[str] = None,
@@ -49,14 +49,15 @@ class MultistepAgent(Agent[None, T]):
         request_limit: Optional[int] = None,
         **kwargs
     ):
-        # TODO: Check compatibility and integration with local models via Ollama.
-        # TODO: Investigate using LiteLLM as an abstraction layer for model interaction.
+        # Reload settings to ensure we have the latest values
+        settings_manager.reload()
+        settings = settings_manager.settings
         
         # Determine the effective model string or instance for super()
         if model is None:
             # Use default unified model from settings
-            provider = settings.model.provider
-            name = settings.model.model_name
+            provider = settings.model_provider
+            name = settings.model_name
             model_input = f"{provider}:{name}"
         else:
             # Pass the provided string or Model instance directly

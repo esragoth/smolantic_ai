@@ -1,15 +1,10 @@
 from dotenv import load_dotenv
-
-# Load environment variables from .env file FIRST
-dotenv_loaded = load_dotenv()
-
-import os # Import os here for debugging
-
-# Load environment variables from .env file FIRST - Removed, relying on pydantic-settings
-# dotenv_loaded = load_dotenv()
+import os
+from typing import List, Dict
+# Force reload of .env file
+load_dotenv(override=True)
 
 import asyncio
-import os
 from pydantic import BaseModel
 from pydantic_ai import Tool
 from pydantic_ai.models import Model
@@ -20,58 +15,70 @@ from smolantic_ai.prebuilt_tools import (
     search_google_tool,
     timezone_tool,
 )
-from smolantic_ai.config import settings as config
+from smolantic_ai.config import settings_manager
 
-# --- DEBUG: Print loaded model config ---
-print(f"DEBUG: Loaded Model Provider: {config.model_provider}")
-print(f"DEBUG: Loaded Model Name: {config.model_name}")
+# --- DEBUG: Print environment and loaded model config ---
+print("Environment Variables:")
+print(f"MODEL_PROVIDER from env: {os.getenv('MODEL_PROVIDER')}")
+print(f"MODEL_NAME from env: {os.getenv('MODEL_NAME')}")
+print("\nSettings Manager:")
+print(f"Model Provider: {settings_manager.settings.model_provider}")
+print(f"Model Name: {settings_manager.settings.model_name}")
 # --- END DEBUG ---
+
+class GoogleSearchResult(BaseModel):
+    title: str
+    url: str
 
 # Re-add the FinalAnswer class definition
 class FinalAnswer(BaseModel):
-     summary_text: str
+     tokyo_time: str
+     tokyo_weather: str
+     google_search: List[GoogleSearchResult]  # List of objects with fields title and url
+
 
 
 async def main():
-    # Define the specific tools the agent needs for this task
-    tools = [
-        get_weather_tool,
-        timezone_tool,
-        search_google_tool,
-    ]
-
-   
-    # Instantiate the MultistepAgent with FinalAnswer as result type
-    agent = MultistepAgent[FinalAnswer]( # Use FinalAnswer as result type
-        tools=tools,
+    # Force reload settings
+    settings_manager.reload()
+    
+    # Print settings after reload
+    print("\nSettings after reload:")
+    print(f"Model Provider: {settings_manager.settings.model_provider}")
+    print(f"Model Name: {settings_manager.settings.model_name}")
+    
+    # Create agent with explicit model settings
+    agent = MultistepAgent(
         result_type=FinalAnswer,
-        # You can optionally specify the model, planning interval, max steps, etc.
-        model=config.model_string, 
-        planning_interval=3, 
-        max_steps=15,
+        tools=[get_weather_tool, search_google_tool, timezone_tool],
+        planning_interval=3,
+        model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}"  # Explicitly set model
     )
 
     # Define the task for the agent
-    task = "What is the current time and weather in Tokyo? Also, find the top 3 Google search results for 'latest advancements in renewable energy'. Summarize the findings."
+    task = (
+        "What is the current time and weather in Tokyo? Also, find the top 3 Google search results for "
+        "'latest advancements in renewable energy'. Summarize the findings."
+    )
 
-    print(f"--- Running MultiStep Agent ---")
+    print("\n--- Running MultiStep Agent ---")
     print(f"Task: {task}")
-    print("----------------------------------")
+    print("-" * 34)
     print("Note: Ensure API keys for weather, search, etc. are set in prebuilt_tools.py")
-    print("----------------------------------\n")
+    print("-" * 34)
+    print()
 
     # Run the agent
     try:
         # The agent will use planning and the provided tools to solve the task
-        result: FinalAnswer = await agent.run(task) # Result type is still FinalAnswer
-        print(f"\n--- Agent Finished ---")
-        print(f"Final Summary:\n{result.summary_text}") # Access the renamed field
-        print("----------------------")
-
+        result = await agent.run(task)
+        print("\nFinal Answer:")
+        print("Tokyo Time: ", result.tokyo_time)
+        print("Tokyo Weather: ", result.tokyo_weather)
+        for search_result in result.google_search:
+            print(f"Title: {search_result.title}, URL: {search_result.url}")
     except Exception as e:
-        print(f"\n--- Agent Error ---")
-        print(f"An error occurred during agent execution: {e}")
-        print("-------------------")
+        print(f"Error: {str(e)}")
 
 if __name__ == "__main__":
     asyncio.run(main()) 

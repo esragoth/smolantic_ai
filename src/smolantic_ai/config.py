@@ -2,6 +2,7 @@ from typing import Optional
 from pydantic import BaseModel # Keep BaseModel for potential future use
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import os # Keep os for now, might be needed for other settings/keys
+from dotenv import load_dotenv
 
 # Removed ModelConfig class
 
@@ -33,6 +34,34 @@ class Settings(BaseSettings):
     # Simplified config: No env_file (rely on explicit load in script)
     model_config = SettingsConfigDict(env_prefix='', env_file_encoding="utf-8", extra="ignore")
 
-# Global settings instance
-settings = Settings()
+# Create a settings instance that can be reloaded
+class SettingsManager:
+    def __init__(self):
+        self._settings = None
+        self.reload()
+
+    def reload(self):
+        """Reload settings from environment variables."""
+        # Clear any existing environment variables
+        if 'MODEL_PROVIDER' in os.environ:
+            del os.environ['MODEL_PROVIDER']
+        if 'MODEL_NAME' in os.environ:
+            del os.environ['MODEL_NAME']
+            
+        # Force reload .env file
+        load_dotenv(override=True)
+        
+        # Create new settings instance
+        self._settings = Settings()
+
+    @property
+    def settings(self):
+        """Get the current settings instance."""
+        return self._settings
+
+# Create a global settings manager
+settings_manager = SettingsManager()
+
+# For backward compatibility, expose settings directly
+settings = settings_manager.settings
 # Removed debug prints 
