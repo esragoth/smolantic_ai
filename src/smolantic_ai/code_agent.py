@@ -14,7 +14,7 @@ class CodeResult(BaseModel):
     result: str = Field(description="The execution result as a string")
     explanation: str = Field(description="Explanation of what the code does")
 
-class CodeAgent(MultistepAgent[CodeResult]):
+class CodeAgent(MultistepAgent[None, CodeResult]):
     """Agent specialized for code generation and execution."""
     
     def __init__(

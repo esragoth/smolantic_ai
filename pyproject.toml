@@ -34,4 +34,8 @@ dev = [
     "black>=23.0",
     "isort>=5.0",
     "flake8>=6.0",
-] 
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function" 

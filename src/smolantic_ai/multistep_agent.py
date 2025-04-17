@@ -1,9 +1,10 @@
 from typing import Any, Dict, List, Optional, TypeVar, Generic, Callable, Union
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, Tool
+from pydantic_ai.agent import AgentRunResult
 from pydantic_ai import UserPromptNode, ModelRequestNode, CallToolsNode
-from pydantic_ai.models import Model, ModelRequestParameters
-from pydantic_ai.settings import ModelSettings
+from pydantic_ai.models import Model, ModelRequestParameters, ModelSettings
+from pydantic_ai.usage import UsageLimits, Usage
 from pydantic_ai.messages import ModelRequest,SystemPromptPart,UserPromptPart
 from pydantic_graph import End
 from .models import Message, MessageRole, ActionStep, AgentMemory, MultistepResult, PlanningStep, TaskStep, FinalAnswerStep
@@ -24,9 +25,10 @@ class PlanningResponse(BaseModel):
     facts: str = Field(description="Survey of known facts and facts to discover")
     plan: str = Field(description="Step-by-step plan to solve the task")
 
-T = TypeVar('T', bound=BaseModel)
+T = TypeVar('T')
+DepsT = TypeVar('DepsT')
 
-class MultistepAgent(Agent[None, T]):
+class MultistepAgent(Agent[DepsT, T], Generic[DepsT, T]):
     """Base agent specialized for handling multi-step tasks with planning and execution."""
     
     # TODO: Add support for passing specific model parameters (temperature, top_p, etc.) through __init__ or run.
@@ -44,6 +46,7 @@ class MultistepAgent(Agent[None, T]):
         system_prompt: Optional[str] = None,
         max_steps: int = 20,
         result_type: Optional[type[T]] = None,
+        deps_type: Optional[type[DepsT]] = None,
         logger_name: Optional[str] = None,
         on_step: Optional[Callable[[ActionStep], None]] = None,
         request_limit: Optional[int] = None,
@@ -70,13 +73,14 @@ class MultistepAgent(Agent[None, T]):
         # Set up usage limits
         if request_limit is not None:
             from pydantic_ai.usage import UsageLimits
-            kwargs['usage_limits'] = UsageLimits(request_limit=request_limit)
+            self.usage_limits = UsageLimits(request_limit=request_limit)
         
         # Initialize base agent - Pass result_type directly
         # Also pass result_tool_name/description if provided
         super().__init__(
             model=model_input,
             result_type=result_type,
+            deps_type=deps_type,
             tools=tools or [],
             system_prompt=system_prompt or MULTISTEP_AGENT_SYSTEM_PROMPT,
             **kwargs
@@ -566,7 +570,14 @@ class MultistepAgent(Agent[None, T]):
             self.logger.error(traceback.format_exc())
             return None
 
-    async def run(self, task: str, **kwargs) -> T:
+    async def run(
+        self,
+        task: str,
+        deps: Optional[DepsT] = None,
+        usage: Optional[Usage] = None,
+        usage_limits: Optional[UsageLimits] = None,
+        **kwargs
+    ) -> AgentRunResult[T]:
         """Run the agent with the given task, relying on base agent for final result."""
         # Log agent settings at the start of the run
         # Access model name safely
@@ -594,8 +605,14 @@ class MultistepAgent(Agent[None, T]):
         current_step_logged = False # Flag to avoid double logging within loop
 
         try:
-            # Use the base agent's iterator
-            async with super().iter(task, **kwargs) as agent_run:
+            # Use the base agent's iterator, passing deps and usage
+            async with super().iter(
+                task, 
+                deps=deps,
+                usage=usage,
+                usage_limits=usage_limits,
+                **kwargs
+            ) as agent_run:
                 # Initial planning
                 if self.planning_prompt is not None:
                     planning_step = await self._create_planning_step(task, is_first_step=True)
@@ -633,10 +650,6 @@ class MultistepAgent(Agent[None, T]):
                         # Log final result via its helper
                         self._log_end_node(node)
                     
-                    # else: 
-                    #    # Handle potential unknown node types if necessary
-                    #    pass
-
                     # --- Replanning Check (Uses updated self.step_count) ---
                     if (self.planning_interval is not None and
                         self.planning_prompt is not None and
@@ -646,9 +659,10 @@ class MultistepAgent(Agent[None, T]):
                         planning_step = await self._create_planning_step(task, is_first_step=False)
                         self.memory.add_step(planning_step)
 
-                # --- Get Final Result (Now only used for return value) ---
+                # --- Get Final Result (Now used for return value) ---
                 if agent_run.result:
-                    return agent_run.result.data
+                    # Return the full AgentRunResult
+                    return agent_run.result
                 else:
                     self.logger.error("Agent run finished via super().iter() but no result was found.")
                     raise RuntimeError("Agent finished without result.")
