@@ -30,3 +30,4 @@ htmlcov/
 # Local development
 .env
 .env.local 
+src/smolantic_ai/smolantic_ai.code-workspace
