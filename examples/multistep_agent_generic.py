@@ -17,15 +17,6 @@ from smolantic_ai.prebuilt_tools import (
 )
 from smolantic_ai.config import settings_manager
 
-# --- DEBUG: Print environment and loaded model config ---
-print("Environment Variables:")
-print(f"MODEL_PROVIDER from env: {os.getenv('MODEL_PROVIDER')}")
-print(f"MODEL_NAME from env: {os.getenv('MODEL_NAME')}")
-print("\nSettings Manager:")
-print(f"Model Provider: {settings_manager.settings.model_provider}")
-print(f"Model Name: {settings_manager.settings.model_name}")
-# --- END DEBUG ---
-
 class GoogleSearchResult(BaseModel):
     title: str
     url: str
@@ -36,16 +27,9 @@ class FinalAnswer(BaseModel):
      tokyo_weather: str
      google_search: List[GoogleSearchResult]  # List of objects with fields title and url
 
-
-
 async def main():
     # Force reload settings
     settings_manager.reload()
-    
-    # Print settings after reload
-    print("\nSettings after reload:")
-    print(f"Model Provider: {settings_manager.settings.model_provider}")
-    print(f"Model Name: {settings_manager.settings.model_name}")
     
     # Create agent with explicit model settings
     agent = MultistepAgent(
