@@ -16,11 +16,10 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 import json
-from smolantic_ai.code_agent import CodeResult
+from smolantic_ai.models import CodeResult
 
 # Assuming agents are importable from smolantic_ai
-from smolantic_ai.code_agent import CodeAgent
-from smolantic_ai.multistep_agent import MultistepAgent
+from smolantic_ai import CodeAgent, MultistepAgent
 from pydantic_ai import Tool
 
 # Global setup for tests
@@ -30,6 +29,10 @@ models.ALLOW_MODEL_REQUESTS = False  # Prevent accidental real LLM calls
 # Define a simple result type for the test
 class WeatherResult(BaseModel):
     output: str
+
+# Define a simple dependency type for the test
+class TestDeps(BaseModel):
+    info: str = "test data"
 
 # Unified test model logic
 def unified_model_logic(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -98,10 +101,11 @@ def unified_model_logic(messages: list[ModelMessage], info: AgentInfo) -> ModelR
 # --- Fixtures ---
 @pytest.fixture
 def multistep_agent_test_model():
-    agent = MultistepAgent[WeatherResult](
+    agent = MultistepAgent[TestDeps, WeatherResult](
         model=FunctionModel(unified_model_logic),
         tools=[],
-        result_type=WeatherResult
+        result_type=WeatherResult,
+        deps_type=TestDeps
     )
     yield agent
 
@@ -115,10 +119,11 @@ def multistep_agent_function_model():
         return "Unknown"
     get_weather_tool = Tool(name="get_weather", description="Gets the weather.", function=get_weather)
 
-    agent = MultistepAgent[WeatherResult](
+    agent = MultistepAgent[TestDeps, WeatherResult](
         model=FunctionModel(unified_model_logic),
         tools=[get_weather_tool],
-        result_type=WeatherResult
+        result_type=WeatherResult,
+        deps_type=TestDeps
     )
     yield agent
 
@@ -126,7 +131,9 @@ def multistep_agent_function_model():
 def code_agent_test_model():
     agent = CodeAgent(
         model=FunctionModel(unified_model_logic),
-        tools=[]
+        tools=[],
+        executor_type="local",
+        authorized_imports=["math", "os"]
     )
     yield agent
 
@@ -134,7 +141,9 @@ def code_agent_test_model():
 def code_agent_function_model():
     agent = CodeAgent(
         model=FunctionModel(unified_model_logic),
-        tools=[]
+        tools=[],
+        executor_type="local",
+        authorized_imports=["math", "os"]
     )
     yield agent
 
@@ -154,6 +163,7 @@ async def test_multistep_agent_with_function_model(multistep_agent_function_mode
 async def test_code_agent_with_test_model(code_agent_test_model: CodeAgent):
     prompt = "Write a function to add two numbers."
     result = await code_agent_test_model.run(prompt)
+    assert isinstance(result, CodeResult)
     assert result.explanation == "Test code response for CodeAgent"
 
 async def test_code_agent_with_function_model(code_agent_function_model: CodeAgent):

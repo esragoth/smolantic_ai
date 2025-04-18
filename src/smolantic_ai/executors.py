@@ -37,16 +37,44 @@ class PythonExecutor:
         raise NotImplementedError
 
     def _check_imports(self, code: str) -> None:
-        """Check if the code contains any unauthorized imports."""
-        tree = ast.parse(code)
+        """Check if the code contains any unauthorized imports or their subpackages."""
+        # Remove potential start/end tags before parsing
+        clean_code = code.strip()
+        if clean_code.startswith("<start_code>"):
+            clean_code = clean_code[len("<start_code>"):]
+        if clean_code.endswith("<end_code>"):
+            clean_code = clean_code[:-len("<end_code>")]
+        clean_code = clean_code.strip() # Remove potential whitespace after tag removal
+
+        tree = ast.parse(clean_code)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                for name in node.names:
-                    if name.name not in self.authorized_imports:
-                        raise ImportError(f"Import of {name.name} is not allowed")
+                for alias in node.names:
+                    module_name = alias.name
+                    parts = module_name.split('.')
+                    is_authorized = False
+                    for i in range(1, len(parts) + 1):
+                        prefix = ".".join(parts[:i])
+                        if prefix in self.authorized_imports:
+                            is_authorized = True
+                            break
+                    if not is_authorized:
+                        raise ImportError(f"Import of {module_name} is not allowed")
             elif isinstance(node, ast.ImportFrom):
-                if node.module not in self.authorized_imports:
-                    raise ImportError(f"Import from {node.module} is not allowed")
+                # Handle absolute imports (node.module is not None)
+                if node.module:
+                    module_name = node.module
+                    parts = module_name.split('.')
+                    is_authorized = False
+                    for i in range(1, len(parts) + 1):
+                        prefix = ".".join(parts[:i])
+                        if prefix in self.authorized_imports:
+                            is_authorized = True
+                            break
+                    if not is_authorized:
+                        raise ImportError(f"Import from {module_name} is not allowed")
+                # Note: Relative imports (node.module is None) are implicitly allowed by this logic.
+                # If stricter control over relative imports is needed, add checks here based on node.level.
 
     def _truncate_output(self, output: str) -> str:
         """Truncate output if it exceeds max length."""

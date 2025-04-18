@@ -123,6 +123,17 @@ class CodeExecutionResult(AgentResult):
     execution_logs: str
     is_final_answer: bool = False
 
+class CodeResult(BaseModel):
+    """Result of code execution."""
+    code: str = Field(..., description="The executed code")
+    result: Optional[Any] = Field(None, description="The result of the code execution")
+    explanation: str = Field(..., description="Explanation of the code and result")
+    execution_logs: str = Field(..., description="Logs from the code execution")
+    answer: Optional[Any] = Field(None, description="The final answer from the code execution")
+
+    def __str__(self) -> str:
+        return f"Result: {self.result}"
+
 class TaskStep(BaseModel):
     """Represents a task execution step."""
     task: str

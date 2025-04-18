@@ -5,6 +5,8 @@ import json
 import urllib.request
 import ssl
 import os
+import warnings
+from urllib3.exceptions import InsecureRequestWarning
 from dotenv import load_dotenv
 from pydantic_ai import Tool
 from .config import settings
@@ -243,91 +245,100 @@ def search_google(query: str, location: Optional[str] = None, language: str = "e
     """
     Performs a Google search using Bright Data's SERP API and returns formatted results.
     Only returns organic search results without images.
-    
+
     Args:
         query: The search query string
-        location:  Location to localize search results (e.g. "Austin, Texas, United States") 
+        location:  Location to localize search results (e.g. "Austin, Texas, United States")
         language: Language code for results (default "en")
         country: Country code for results. MANDATORY.
-        
+
     Returns:
         str: A markdown-formatted string containing only the organic search results
-        
-    Raises:
-        Exception: If there is an error performing the search
     """
+    # Configure proxy details (ensure these credentials are secure)
+    # Consider loading from env vars/config instead of hardcoding if sensitive
+    proxy_user = 'brd-customer-hl_10d3d7a9-zone-serp_api2'
+    proxy_pass = '7edm2leyjmgg'
+    proxy_host = 'brd.superproxy.io'
+    proxy_port = '33335'
+    proxy_url = f'http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}'
+    proxies = {
+        'http': proxy_url,
+        'https': proxy_url
+    }
+
+    # Construct search URL parameters
+    params = {
+        'q': query,
+        'hl': language,
+        'gl': country,
+        'brd_json': '1' # Request JSON response
+    }
+    if location:
+        params['location'] = location
+        # Note: The example curl command used a 'uule' parameter which is complex to generate.
+        # We are omitting it for now, relying on 'location' and 'gl'.
+
+    # Base Google search URL
+    base_search_url = 'https://www.google.com/search'
+    timeout_seconds = 30
+
     try:
-        # Disable SSL verification
-        ssl._create_default_https_context = ssl._create_unverified_context
-        
-        # Load proxy URL from environment variables
-        proxy_url = os.getenv("BRIGHTDATA_PROXY_URL")
-        if not proxy_url:
-            return "Error: BRIGHTDATA_PROXY_URL environment variable not set. Please add it to your .env file."
-        
-        # Build URL opener with proxy
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({
-                'http': proxy_url,
-                'https': proxy_url
-            })
+        # Suppress only the InsecureRequestWarning from urllib3 needed for verify=False
+        warnings.filterwarnings('ignore', category=InsecureRequestWarning)
+
+        response = requests.get(
+            base_search_url,
+            params=params,
+            proxies=proxies,
+            verify=False, # Equivalent to curl -k (disable SSL cert verification)
+            timeout=timeout_seconds
         )
-        
-        # Construct search URL with parameters
-        search_url = f'https://www.google.{country}/search?q={urllib.parse.quote(query)}'
-        if language:
-            search_url += f'&hl={language}'
-        if country:
-            search_url += f'&gl={country}'
-        if location:
-            search_url += f'&location={urllib.parse.quote(location)}'
-            
-        # Add brd_json parameter for JSON response format
-        search_url += '&brd_json=1'
-            
-        # Make request
-        response = opener.open(search_url)
-        response_data = response.read().decode('utf-8')
-        
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
         try:
-            # Try to parse as JSON
-            data = json.loads(response_data)
+            data = response.json()
         except json.JSONDecodeError:
-            return "Error: Unable to parse search results"
-            
+            return f"Error: Unable to parse search results as JSON. Response started with: {response.text[:200]}"
+
         # Format results as markdown - only organic results
+        if not data or "organic" not in data:
+            return "No organic results found in the response."
+
         markdown = "### Google Search Results\n\n"
-        
-        # Add organic results
-        if "organic" in data:
-            for result in data["organic"]:
-                # Create a clean result dictionary without image fields
-                clean_result = {
-                    "title": result.get("title", "No title"),
-                    "link": result.get("link", "#"),
-                    "description": result.get("description", "No description available"),
-                    "display_link": result.get("display_link", result.get("link", "#")),
-                    "rank": result.get("rank"),
-                    "global_rank": result.get("global_rank")
-                }
-                
-                markdown += f"#### [{clean_result['title']}]({clean_result['link']})\n"
-                markdown += f"**URL:** {clean_result['display_link']}\n"
-                markdown += f"**Description:** {clean_result['description']}\n\n"
-                
-                # Add any extensions/missing terms
-                if "extensions" in result:
-                    for ext in result["extensions"]:
-                        if ext.get("type") == "missing":
-                            markdown += f"*Missing term: {ext.get('text', '')}*\n"
-                
-                markdown += "---\n\n"
-                
-        time.sleep(5)
-        return markdown if "organic" in data else "No results found."
-        
+        for result in data["organic"]:
+            clean_result = {
+                "title": result.get("title", "No title"),
+                "link": result.get("link", "#"),
+                "description": result.get("description", "No description available"),
+                "display_link": result.get("display_link", result.get("link", "#")),
+                "rank": result.get("rank"),
+            }
+
+            markdown += f"#### [{clean_result['title']}]({clean_result['link']})\n"
+            markdown += f"**URL:** {clean_result['display_link']}\n"
+            markdown += f"**Description:** {clean_result['description']}\n\n"
+            markdown += "---\n\n"
+
+        return markdown
+
+    except requests.exceptions.Timeout:
+        return f"Error performing Google search: Request timed out after {timeout_seconds} seconds."
+    except requests.exceptions.ProxyError as e:
+        return f"Error performing Google search (Proxy Error): {str(e)}"
+    except requests.exceptions.SSLError as e:
+        # Should be bypassed by verify=False, but catch just in case
+        return f"Error performing Google search (SSL Error): {str(e)}"
+    except requests.exceptions.RequestException as e:
+        # Catch other requests-related errors (connection, too many redirects, etc.)
+        status_code = e.response.status_code if e.response is not None else "N/A"
+        return f"Error performing Google search (RequestException): {str(e)} (Status: {status_code})"
     except Exception as e:
-        return f"Error performing Google search: {str(e)}"
+        # General catch-all for other unexpected errors during processing
+        return f"Error performing Google search (Unexpected): {str(e)} Type: {type(e).__name__}"
+    finally:
+        # Ensure the warning filter is reset after the call, regardless of outcome
+        warnings.resetwarnings()
 
 def format_search_results_to_markdown(search_results: dict) -> str:
     """Convert Tavily search results to markdown format
@@ -492,3 +503,62 @@ __all__ = [
     "divide_tool",
     "prebuilt_tools_list",
 ]
+
+# --- Live API Test Functions (for manual execution) ---
+
+def _run_live_tests():
+    """Runs live tests against the actual APIs. Requires API keys in environment."""
+    print("--- Running Live API Tests ---")
+
+    # Ensure dotenv is loaded (should be loaded at the top already)
+    load_dotenv()
+
+    # --- Weather Test ---
+    print("\nTesting get_weather...")
+    weather_location = "Paris, France"
+    weather_result = get_weather(weather_location, aqi="yes")
+    print(f"Weather result for {weather_location}:\n{weather_result}")
+    if "Error:" in weather_result:
+        print("*** Weather Test Failed (API Error or Key Missing?) ***")
+
+    # --- Currency Conversion Test ---
+    print("\nTesting convert_currency...")
+    amount = 100
+    from_curr = "USD"
+    to_curr = "EUR"
+    currency_result = convert_currency(amount, from_curr, to_curr)
+    print(f"Currency result for {amount} {from_curr} to {to_curr}: {currency_result}")
+    if "Error:" in currency_result:
+        print("*** Currency Test Failed (API Error or Key Missing?) ***")
+
+    # --- Timezone Test ---
+    print("\nTesting get_timezone_by_city...")
+    timezone_location = "Tokyo, Japan"
+    timezone_result = get_timezone_by_city(timezone_location)
+    print(f"Timezone result for {timezone_location}:\n{timezone_result}")
+    if "Error:" in timezone_result:
+        print("*** Timezone Test Failed (API Error or Key Missing?) ***")
+
+    # --- Google Search Test ---
+    # Note: This depends on the specific Bright Data proxy setup in the function.
+    print("\nTesting search_google...")
+    search_query = "latest news on AI"
+    search_country = "us"
+    google_result = search_google(search_query, country=search_country)
+    print(f"Google Search result for '{search_query}' (country: {search_country}):\n{google_result[:500]}... (truncated)") # Truncate long results
+    if "Error performing Google search:" in google_result or "Error: Unable to parse search results" in google_result:
+        print("*** Google Search Test Failed (API/Proxy Error?) ***")
+
+    # --- Read Webpage Test ---
+    print("\nTesting read_webpage...")
+    webpage_url = "https://example.com"
+    webpage_result = read_webpage(webpage_url)
+    print(f"Read Webpage result for {webpage_url}:\n{webpage_result[:500]}... (truncated)")
+    if "Error:" in webpage_result:
+        print("*** Read Webpage Test Failed (API Error or Key Missing?) ***")
+
+    print("\n--- Live API Tests Finished ---")
+
+if __name__ == "__main__":
+    # This block executes only when the script is run directly
+    _run_live_tests()

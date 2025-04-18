@@ -3,9 +3,14 @@ import os
 from dotenv import load_dotenv
 from smolantic_ai import CodeAgent
 from smolantic_ai.logging import get_logger
-
+from smolantic_ai.prebuilt_tools import timezone_tool, search_google_tool, read_webpage_tool
+from pydantic import BaseModel, Field
 # Configure logging
 logger = get_logger()
+
+class FinalAnswer(BaseModel):
+    answer: str = Field(description="The final answer to the user's question")
+    explanation: str = Field(description="Explanation of how the answer was derived")
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,16 +23,19 @@ async def main():
     agent = CodeAgent(
         # You can specify a model like: model="gpt-4o-mini"
         # You can specify executor_type: "local", "e2b", "docker"
-        authorized_imports=["math"], # Example: Allow the 'math' library
-        planning_interval=3
+        authorized_imports=["math", "requests", "json", "datetime", "os", "re", "matplotlib"],
+        planning_interval=3,
+        result_type=FinalAnswer,
+        tools=[
+            timezone_tool,
+            search_google_tool,
+            read_webpage_tool,
+        ]
     )
 
     # Define the task for the agent
     task = (
-        "Write a Python function that takes a list of numbers and returns a new list "
-        "containing only the even numbers. Then, write a second function that calculates "
-        "the sum of the even numbers from the list. Finally, provide an explanation of how "
-        "both functions work."
+        "Draw and save a bar chart of the top 10 most popular programming languages in the world. Get current accurate data from the internet."
     )
 
     print(f"Running CodeAgent with task: '{task}'")
@@ -40,9 +48,8 @@ async def main():
         # Print the results
         print("\n" + "=" * 30)
         print("Code Agent Result:")
+        print(f"Answer: {result.answer}")
         print(f"Explanation: {result.explanation}")
-        print(f"Code:\n```python\n{result.code}\n```")
-        print(f"Execution Result: {result.result}")
         print("=" * 30)
 
     except Exception as e:
