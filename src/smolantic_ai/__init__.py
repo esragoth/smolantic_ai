@@ -2,7 +2,6 @@
 SmolAntic AI - A small but powerful AI agent framework
 """
 
-from .agent import BaseAgent, CodeResult
 from .code_agent import CodeAgent
 from .multistep_agent import MultistepAgent
 from .executors import PythonExecutor, LocalPythonExecutor, E2BExecutor, DockerExecutor, CodeExecutionResult

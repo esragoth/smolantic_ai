@@ -1,6 +1,7 @@
-from typing import Any, Dict, List, Optional, TypeVar, cast, Type
+from typing import Any, Dict, List, Optional, TypeVar, cast, Type, Callable
 from pydantic import Field
-from pydantic_ai import  RunContext, Tool  
+from pydantic import BaseModel
+from pydantic_ai import Tool 
 from pydantic_ai import UserPromptNode, ModelRequestNode, CallToolsNode
 from pydantic_graph import End
 from .models import (
@@ -18,16 +19,21 @@ from .prompts import (
     MULTISTEP_AGENT_PLANNING_UPDATE_PRE,
     MULTISTEP_AGENT_PLANNING_UPDATE_POST,
 )
+from .models import (
+    Node,
+    Step,
+)
 from jinja2 import Template
 from pydantic_ai import messages as pydantic_ai_messages
 from dataclasses import dataclass
-from smolantic_ai.agent import BaseAgent
+from .agent import BaseAgent
 import json
+from typing import get_origin
 
 logger = get_logger(__name__)
 
-T = TypeVar('T')
 DepsT = TypeVar('DepsT')
+ResultT = TypeVar('ResultT', bound=BaseModel)
 
 @dataclass
 class MultistepAgentResult(AgentResult):
@@ -46,7 +52,7 @@ class MultistepAgentResult(AgentResult):
             error_traceback=result.error_traceback,
         )
 
-class MultistepAgent(BaseAgent):
+class MultistepAgent(BaseAgent[DepsT, ResultT]):
     """Agent that can execute multiple steps in sequence."""
 
     # --- Required Abstract Method Implementations ---
@@ -74,10 +80,14 @@ class MultistepAgent(BaseAgent):
         self,
         model: Any,
         tools: List[Tool],
-        result_type: Type[T],
+        result_type: Type[ResultT],
+        deps_type: Type[DepsT] = type(None),
         logger_name: Optional[str] = None,
         max_steps: int = 10,
         planning_interval: Optional[int] = None,
+        node_callback: Optional[Callable[[Node], None]] = None,
+        step_callback: Optional[Callable[[Step], None]] = None,
+        verbose: bool = False,
     ):
         """Initialize the agent.
 
@@ -85,6 +95,7 @@ class MultistepAgent(BaseAgent):
             model: The model to use for generating responses.
             tools: The tools available to the agent.
             result_type: The type of result to return.
+            deps_type: The type of dependencies required by the agent.
             logger_name: The name of the logger to use.
             max_steps: The maximum number of steps to take.
             planning_interval: The number of steps between planning steps.
@@ -93,9 +104,13 @@ class MultistepAgent(BaseAgent):
             model=model,
             tools=tools,
             result_type=result_type,
+            deps_type=deps_type,
             logger_name=logger_name,
             max_steps=max_steps,
             planning_interval=planning_interval,
+            verbose=verbose,
+            node_callback=node_callback,
+            step_callback=step_callback,
         )
         self.tools = tools
         self.memory = AgentMemory()
@@ -128,7 +143,7 @@ class MultistepAgent(BaseAgent):
         jinja_template = Template(template)
         return jinja_template.render(**kwargs)
 
-    async def _process_run_result(self, agent_run: AgentResult) -> T:
+    async def _process_run_result(self, agent_run: AgentResult) -> ResultT:
         """Process the run result and return the final result."""
         if hasattr(agent_run, 'result') and agent_run.result is not None:
             if hasattr(agent_run.result, 'data'):
@@ -138,17 +153,45 @@ class MultistepAgent(BaseAgent):
 
             self.logger.info(f"Agent run finished. Final result data type: {type(actual_result_data).__name__}")
 
-            if isinstance(actual_result_data, self.result_type):
-                return actual_result_data
+            # Get the origin type (e.g., list for List[str])
+            origin = get_origin(self.result_type)
+            if origin is not None:
+                # For generic types, check if the actual data matches the expected type
+                if origin is list and isinstance(actual_result_data, list):
+                    return actual_result_data
+                elif origin is dict and isinstance(actual_result_data, dict):
+                    return actual_result_data
+                else:
+                    self.logger.error(f"Agent run finished, but extracted data type {type(actual_result_data).__name__} does not match expected {str(self.result_type)}.")
+                    explanation_text = f"Agent finished with unexpected result type: {type(actual_result_data).__name__}. Content: {str(actual_result_data)}"
+                    if hasattr(self.result_type, 'model_fields'):
+                        if 'error' in self.result_type.model_fields:
+                            return self.result_type(error="Type mismatch", explanation=explanation_text)
+                        elif 'explanation' in self.result_type.model_fields:
+                            return self.result_type(explanation=explanation_text)
+                    return self.result_type()  # Try to create a default instance
             else:
-                self.logger.error(f"Agent run finished, but extracted data type {type(actual_result_data).__name__} does not match expected {self.result_type.__name__}.")
-                explanation_text = f"Agent finished with unexpected result type: {type(actual_result_data).__name__}. Content: {str(actual_result_data)}"
-                if hasattr(self.result_type, 'model_fields'):
-                    if 'error' in self.result_type.model_fields:
-                        return self.result_type(error="Type mismatch", explanation=explanation_text)
-                    elif 'explanation' in self.result_type.model_fields:
-                        return self.result_type(explanation=explanation_text)
-                return self.result_type()  # Try to create a default instance
+                # For concrete types, use isinstance
+                if isinstance(actual_result_data, self.result_type):
+                    return actual_result_data
+                else:
+                    # Try to convert the data to the expected type
+                    try:
+                        if hasattr(self.result_type, 'model_validate'):
+                            return self.result_type.model_validate(actual_result_data)
+                        elif hasattr(self.result_type, 'parse_obj'):
+                            return self.result_type.parse_obj(actual_result_data)
+                        else:
+                            return self.result_type(**actual_result_data)
+                    except Exception as e:
+                        self.logger.error(f"Failed to convert result to {self.result_type.__name__}: {e}")
+                        explanation_text = f"Agent finished with unexpected result type: {type(actual_result_data).__name__}. Content: {str(actual_result_data)}"
+                        if hasattr(self.result_type, 'model_fields'):
+                            if 'error' in self.result_type.model_fields:
+                                return self.result_type(error="Type mismatch", explanation=explanation_text)
+                            elif 'explanation' in self.result_type.model_fields:
+                                return self.result_type(explanation=explanation_text)
+                        return self.result_type()  # Try to create a default instance
         else:
             self.logger.error("Agent run completed, but no result object found on agent_run.")
             explanation_text = "Agent finished without producing a final result or error."

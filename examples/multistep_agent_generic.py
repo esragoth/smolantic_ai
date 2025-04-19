@@ -16,7 +16,7 @@ from smolantic_ai.prebuilt_tools import (
     timezone_tool,
 )
 from smolantic_ai.config import settings_manager
-
+from smolantic_ai.models import Node, Step, pretty_print_node
 class GoogleSearchResult(BaseModel):
     title: str
     url: str
@@ -27,6 +27,14 @@ class FinalAnswer(BaseModel):
      tokyo_weather: str
      google_search: List[GoogleSearchResult]  # List of objects with fields title and url
 
+
+
+def node_callback(node: Node):
+    print(pretty_print_node(node))
+
+def step_callback(step: Step):
+    print(f"Step: {step.step_type}")
+
 async def main():
     # Force reload settings
     settings_manager.reload()
@@ -36,7 +44,8 @@ async def main():
         result_type=FinalAnswer,
         tools=[get_weather_tool, search_google_tool, timezone_tool],
         planning_interval=3,
-        model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}"  # Explicitly set model
+        model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}",
+        node_callback=node_callback,
     )
 
     # Define the task for the agent

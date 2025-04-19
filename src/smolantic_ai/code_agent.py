@@ -22,10 +22,11 @@ from .agent import BaseAgent
 # Load .env at the module level to ensure environment variables are available
 load_dotenv()
 
-# Define the generic type variable bound to BaseModel
-T = TypeVar('T', bound=BaseModel)
+# Define the generic type variables
+DepsT = TypeVar('DepsT')
+ResultT = TypeVar('ResultT', bound=BaseModel)
 
-class CodeAgent(BaseAgent[Union[CodeResult, T]]):
+class CodeAgent(BaseAgent[DepsT, Union[CodeResult, ResultT]]):
     """Agent specialized for code generation and execution.
     
     This agent uses a code-based approach where the LLM produces Python code
@@ -39,7 +40,8 @@ class CodeAgent(BaseAgent[Union[CodeResult, T]]):
     
     def __init__(
         self,
-        result_type: Optional[Type[T]] = None,
+        result_type: Optional[Type[ResultT]] = None,
+        deps_type: Type[DepsT] = type(None),
         model: Optional[str] = None,
         tools: Optional[List[Tool]] = None,
         executor_type: str = "local",
@@ -49,6 +51,7 @@ class CodeAgent(BaseAgent[Union[CodeResult, T]]):
         logger_name: Optional[str] = None,
         system_prompt: Optional[str] = None,
         max_steps: int = 20,
+        verbose: bool = False,
         **kwargs
     ):
         # Store CodeAgent-specific attributes
@@ -63,12 +66,14 @@ class CodeAgent(BaseAgent[Union[CodeResult, T]]):
         # Initialize base agent
         super().__init__(
             result_type=result_type or CodeResult,
+            deps_type=deps_type,
             model=model,
             tools=self.tools,
             planning_interval=planning_interval,
             logger_name=logger_name,
             system_prompt=system_prompt,
             max_steps=max_steps,
+            verbose=verbose,
             **kwargs
         )
         
@@ -129,7 +134,7 @@ class CodeAgent(BaseAgent[Union[CodeResult, T]]):
             self.logger.error(f"Template: {template}")
             return template
 
-    async def _process_run_result(self, agent_run: AgentRunResult) -> Union[CodeResult, T]:
+    async def _process_run_result(self, agent_run: AgentRunResult) -> Union[CodeResult, ResultT]:
         """Process the final result from the agent run."""
         if hasattr(agent_run, 'result') and agent_run.result is not None:
                     if hasattr(agent_run.result, 'data'):
@@ -281,7 +286,7 @@ class CodeAgent(BaseAgent[Union[CodeResult, T]]):
 
         return "No detailed thought process extracted." # Default if nothing suitable found
 
-    async def _handle_run_error(self, error: Exception, error_msg: str, traceback_str: str) -> Union[CodeResult, T]:
+    async def _handle_run_error(self, error: Exception, error_msg: str, traceback_str: str) -> Union[CodeResult, ResultT]:
         """Handle errors during agent run with code-specific error handling."""
         try:
             if hasattr(self.result_type, 'model_fields'):

@@ -21,7 +21,9 @@ class AgentLogger:
     def log_step(self, step_type: str, step_data: str, indent: int = 0) -> None:
         """Log a step with pretty printing."""
         indent_str = "  " * indent
-        message = f"\n{indent_str}{step_data}"
+        # Add a single separator line before each new step
+        separator = "─" * 80
+        message = f"\n{separator}\n{indent_str}{step_data}"
         self.logger.info(message)
         # Force immediate output by flushing the stream
         for handler in self.logger.handlers:

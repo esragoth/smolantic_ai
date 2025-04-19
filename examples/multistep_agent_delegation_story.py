@@ -4,7 +4,7 @@ import asyncio
 import os
 from typing import List, Dict
 from dotenv import load_dotenv
-
+from pydantic import BaseModel, Field
 # Assuming your project structure allows these imports
 # Adjust paths if necessary, e.g., if running from the root directory:
 # from src.smolantic_ai.multistep_agent import MultistepAgent
@@ -31,8 +31,7 @@ chapter_title_agent = MultistepAgent[None, List[str]](
     # Use a potentially faster/cheaper model for this focused task
     model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}", # Example: 'google:gemini-1.5-flash-latest'
     result_type=List[str],
-    system_prompt='Generate creative chapter titles based on the provided topic and count. Return only the list of titles.',
-    request_limit=5, # Limit requests for this agent
+    tools=[],
     logger_name="ChapterTitleAgent",
 )
 
@@ -40,33 +39,43 @@ chapter_title_agent = MultistepAgent[None, List[str]](
 story_writer_agent = MultistepAgent[None, str](
     model="openai:gpt-4.1",
     result_type=str,
-    system_prompt='Write a short, engaging story paragraph (approx. 50-100 words) for the given chapter title. Return only the story paragraph text.',
-    request_limit=5,
+    tools=[],
     logger_name="StoryWriterAgent",
     planning_interval=None,
 )
+
+class StoryChapter(BaseModel):
+    """Model for storing a single story chapter with a title and content."""
+    title: str = Field(description="The title of the chapter")
+    content: str = Field(description="The content of the chapter")
+
+class StoryChapters(BaseModel):
+    """Model for storing story chapters with titles and content."""
+    chapters: List[StoryChapter] = Field(
+        description="List of story chapters with titles and content"
+    )
+
+
 
 # --- Define the Tool for the Parent Agent ---
 # This tool will call the delegate agent
 async def chapter_title_factory(ctx: RunContext[None], topic: str, count: int) -> List[str]:
     """Generates a specified number of chapter titles for a given topic using a specialized agent."""
     logger.info(f"--- Delegating to chapter_title_agent for topic '{topic}' ---")
-    # Call the delegate agent's run method, which now returns AgentRunResult
-    # We need to extract the data from the result object.
+    # Call the delegate agent's run method
     run_result = await chapter_title_agent.run(
         f'Generate {count} chapter titles about: {topic}',
         usage=ctx.usage
     )
     
-    # Extract the data
-    titles = run_result.data
+    # The result is already a list of titles
+    titles = run_result
     
     if isinstance(titles, list):
         logger.info(f"--- Received {len(titles)} titles from chapter_title_agent ---")
         return titles
     else:
         logger.error(f"--- chapter_title_agent returned unexpected type: {type(titles)} ---")
-        # Handle error case appropriately, e.g., return an empty list or raise exception
         return ["Error generating titles"]
 
 # --- Define the Tool for Writing Stories (New) ---
@@ -77,7 +86,7 @@ async def story_writer_factory(ctx: RunContext[None], chapter_title: str) -> str
         f'Write a story paragraph for the chapter titled: "{chapter_title}"' ,
         usage=ctx.usage
     )
-    story = run_result.data
+    story = run_result
     if isinstance(story, str):
         logger.info(f"--- Received story paragraph from stoty_writer_agent ---")
         return story
@@ -91,17 +100,10 @@ async def story_writer_factory(ctx: RunContext[None], chapter_title: str) -> str
 chapter_title_tool = Tool(chapter_title_factory)
 story_writer_tool = Tool(story_writer_factory) # Create tool instance for the new function
 
-story_planner_agent = MultistepAgent[None, Dict[str, str]]( # Expect Dict[title, story] as result
+story_planner_agent = MultistepAgent[None, StoryChapters]( # Expect Dict[title, story] as result
     model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}", # Example: 'openai:gpt-4o-mini'
-    result_type=Dict[str, str], # Updated result type
-    system_prompt=(
-        'You are a master story outline creator.\n'
-        '1. First, use the `chapter_title_factory` tool to generate the required number of chapter titles for the given story topic.\n'
-        '2. Then, for EACH generated chapter title, use the `story_writer_factory` tool to write a short story paragraph.\n'
-        '3. Finally, return ONLY a dictionary where keys are the chapter titles and values are the corresponding story paragraphs.'
-    ),
+    result_type=StoryChapters, # Updated result type
     tools=[chapter_title_tool, story_writer_tool], # Pass BOTH tool instances here
-    request_limit=15, # Adjust limit for potentially more calls
     planning_interval=None, # Disable planning for this simple task
     logger_name="StoryPlannerAgent",
 )
@@ -116,18 +118,17 @@ async def main():
 
     try:
         # Run the main planner agent
-        # MultistepAgent's run now returns AgentRunResult
-        run_result = await story_planner_agent.run(task) # Use the updated task
+        run_result = await story_planner_agent.run(task)
 
-        # Extract the data (expected to be a dictionary)
-        story_chapters = run_result.data
+        # The result should already be a StoryChapters object
+        story_chapters = run_result
         
         print("\nGenerated Story Outline:")
-        if isinstance(story_chapters, dict):
-            for title, story in story_chapters.items():
+        if isinstance(story_chapters, StoryChapters):
+            for chapter in story_chapters.chapters:
                 print("\n--- Chapter --- ")
-                print(f"Title: {title}")
-                print(f"Story: {story}")
+                print(f"Title: {chapter.title}")
+                print(f"Story: {chapter.content}")
                 print("---------------")
         else:
             print("Failed to generate story outline or unexpected output format.")
@@ -135,18 +136,18 @@ async def main():
 
         # Print the final accumulated usage
         print("\nFinal Usage:")
-        print(run_result.usage())
-
-        # Note: Accessing detailed usage might require inspecting agent instances
-        # or enhancing MultistepAgent if cross-agent usage tracking is needed.
-        # logger.info(f"Story Planner Usage: {story_planner_agent.some_usage_property}") # If available
-        # logger.info(f"Chapter Title Usage: {chapter_title_agent.some_usage_property}") # If available
+        if hasattr(run_result, 'usage') and run_result.usage is not None:
+            print(f"Total Tokens: {run_result.usage.total_tokens}")
+            print(f"Prompt Tokens: {run_result.usage.prompt_tokens}")
+            print(f"Completion Tokens: {run_result.usage.completion_tokens}")
+        else:
+            print("Usage information not available")
 
     except Exception as e:
         logger.error(f"An error occurred: {e}", exc_info=True)
         print(f"An error occurred: {e}")
         print("Please ensure your API keys (e.g., OPENAI_API_KEY) are set in a .env file or environment variables.")
-        print("Also check model names in your config and required packages: pip install -r requirements.txt") # Assuming requirements.txt exists
+        print("Also check model names in your config and required packages: pip install -r requirements.txt")
 
 if __name__ == "__main__":
     # Ensure necessary environment variables are set (e.g., OPENAI_API_KEY)
