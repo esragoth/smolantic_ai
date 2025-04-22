@@ -15,6 +15,16 @@ class FinalAnswer(BaseModel):
 # Load environment variables from .env file
 load_dotenv()
 
+def node_callback(node, agent_info):
+    print(f"ID: {agent_info.get('id')}")
+    print(f"Name: {agent_info.get('name')}")
+    print(f"Current Step: {agent_info.get('current_step_count')}")
+    print(node.to_string_summary())
+
+def step_callback(step, agent_info):
+    print(f"Step: {step.id}")
+    print(f"Agent Info: {agent_info}")
+
 async def main():
 
     # Initialize the CodeAgent
@@ -30,7 +40,8 @@ async def main():
             timezone_tool,
             search_google_tool,
             read_webpage_tool,
-        ]
+        ],
+        node_callback=node_callback,
     )
 
     # Define the task for the agent

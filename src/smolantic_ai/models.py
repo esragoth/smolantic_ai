@@ -34,13 +34,65 @@ class Node(BaseModel):
     node_type: NodeType
     error: Optional[str] = None
 
+    def to_string_summary(self) -> str:
+        """Return a concise string summary of the node's contents."""
+        if not self:
+            return "None"
+            
+        def truncate(text: str, max_length: int = 100) -> str:
+            """Truncate text to max_length and add ellipsis if needed."""
+            if len(text) > max_length:
+                return text[:max_length] + "..."
+            return text
+
+        # Start with node type
+        summary = [f"Node Type: {self.node_type.value}"]
+        
+        # Add error if present
+        if self.error:
+            summary.append(f"Error: {self.error}")
+        
+        # Add input messages summary
+        if self.input_messages:
+            summary.append("Input Messages:")
+            for msg in self.input_messages:
+                summary.append(f"  {msg.role}: {truncate(msg.content)}")
+        
+        # Add output messages summary
+        if self.output_messages:
+            summary.append("Output Messages:")
+            for msg in self.output_messages:
+                summary.append(f"  {msg.role}: {truncate(msg.content)}")
+        
+        return "\n".join(summary)
+
 class UserPromptNode(Node):
     """Represents a user prompt node."""
     user_prompt: str = Field(description="The user prompt")
 
+    def to_string_summary(self) -> str:
+        """Return a concise string summary of the user prompt node."""
+        base_summary = super().to_string_summary()
+        return f"{base_summary}\nUser Prompt: {self.user_prompt[:100]}{'...' if len(self.user_prompt) > 100 else ''}"
+
 class CallToolsNode(Node):
     """Represents a call tools node."""
     tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
+
+    def to_string_summary(self) -> str:
+        """Return a concise string summary of the tool calls node."""
+        base_summary = super().to_string_summary()
+        if not self.tool_calls:
+            return base_summary
+            
+        tool_summary = ["Tool Calls:"]
+        for tool_call in self.tool_calls:
+            name = tool_call.get('name', 'Unknown')
+            args = tool_call.get('args', {})
+            args_str = str(args)
+            tool_summary.append(f"  {name}: {args_str[:100]}{'...' if len(args_str) > 100 else ''}")
+            
+        return f"{base_summary}\n" + "\n".join(tool_summary)
 
 class ModelRequestNode(Node):
     """Represents a model request node."""
@@ -49,18 +101,53 @@ class ModelRequestNode(Node):
     tool_return: Optional[List[Dict[str, Any]]] = Field(description="The tool return part of the request")
     retry_prompt: Optional[str] = Field(description="The retry prompt part of the request")
 
+    def to_string_summary(self) -> str:
+        """Return a concise string summary of the model request node."""
+        base_summary = super().to_string_summary()
+        sections = []
+        
+        if self.user_prompt:
+            sections.append(f"User Prompt: {self.user_prompt[:100]}{'...' if len(self.user_prompt) > 100 else ''}")
+        if self.system_prompt:
+            sections.append(f"System Prompt: {self.system_prompt[:100]}{'...' if len(self.system_prompt) > 100 else ''}")
+        if self.tool_return:
+            sections.append("Tool Returns:")
+            for tool_call in self.tool_return:
+                tool_name = tool_call.get('tool_name', 'unknown')
+                tool_content = tool_call.get('content', '')
+                sections.append(f"  {tool_name}: {tool_content[:100]}{'...' if len(tool_content) > 100 else ''}")
+        if self.retry_prompt:
+            sections.append(f"Retry Prompt: {self.retry_prompt[:100]}{'...' if len(self.retry_prompt) > 100 else ''}")
+            
+        return f"{base_summary}\n" + "\n".join(sections) if sections else base_summary
+
 class ModelResponseNode(Node):
     """Represents a model response node."""
     model_response: str = Field(description="The model response")
+
+    def to_string_summary(self) -> str:
+        """Return a concise string summary of the model response node."""
+        base_summary = super().to_string_summary()
+        return f"{base_summary}\nModel Response: {self.model_response[:100]}{'...' if len(self.model_response) > 100 else ''}"
 
 class PlanningNode(Node):
     """Represents a planning node."""
     facts_survey: str = Field(description="Survey of known facts and facts to discover")
     action_plan: str = Field(description="Step-by-step plan to solve the task")
 
+    def to_string_summary(self) -> str:
+        """Return a concise string summary of the planning node."""
+        base_summary = super().to_string_summary()
+        return f"{base_summary}\nFacts Survey: {self.facts_survey[:100]}{'...' if len(self.facts_survey) > 100 else ''}\nAction Plan: {self.action_plan[:100]}{'...' if len(self.action_plan) > 100 else ''}"
+
 class EndNode(Node):
     """Represents an end node."""
     end_reason: str = Field(description="The reason for the end of the process")
+
+    def to_string_summary(self) -> str:
+        """Return a concise string summary of the end node."""
+        base_summary = super().to_string_summary()
+        return f"{base_summary}\nEnd Reason: {self.end_reason}"
 
 class Step(BaseModel):
     """Base class for all step types in the agent's process."""

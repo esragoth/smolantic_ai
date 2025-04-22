@@ -11,7 +11,7 @@ import inspect
 from .models import Message, MessageRole, ActionStep, AgentMemory, PlanningStep, Step, Node, reconstruct_node
 from .config import settings_manager
 from .logging import get_logger
-import asyncio
+import uuid
 
 # Define the generic type variables
 DepsT = TypeVar('DepsT')
@@ -44,24 +44,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         self.logger = get_logger(logger_name or self.__class__.__name__)
         self.memory = AgentMemory() # Initialize memory
         self.verbose = verbose
+        self.id = str(uuid.uuid4())
         if self.planning_interval is not None and self.planning_interval < 2:
             raise ValueError("planning_interval must be None or >= 2")
-        if step_callback is not None:
-            # Check that step_callback accepts exactly one argument of type Step
-            sig = inspect.signature(step_callback)
-            if len(sig.parameters) != 1:
-                raise ValueError("step_callback must accept exactly one argument")
-            param = next(iter(sig.parameters.values()))
-            if param.annotation != Step and param.annotation != inspect.Parameter.empty:
-                raise ValueError("step_callback parameter must be of type Step")
-        if node_callback is not None:
-            # Check that node_callback accepts exactly one argument of type Node
-            sig = inspect.signature(node_callback)
-            if len(sig.parameters) != 1:
-                raise ValueError("node_callback must accept exactly one argument")
-            param = next(iter(sig.parameters.values()))
-            if param.annotation != Node and param.annotation != inspect.Parameter.empty:
-                raise ValueError("node_callback parameter must be of type Node")
         self.node_callback = node_callback
         self.step_callback = step_callback
         # --- Subclass must provide formatted prompt and final tools ---
@@ -154,9 +139,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             if self.planning_interval: # Check if planning is enabled (interval is set)
                 planning_node = await self._create_planning_step(task, is_first_step=True)
                 if self.step_callback:
-                    self.step_callback(planning_node)
+                    self.step_callback(planning_node,self.get_agent_info())
                 if self.node_callback:
-                    self.node_callback(reconstruct_node(planning_node))
+                    self.node_callback(reconstruct_node(planning_node),self.get_agent_info())
                 # Add a small delay to ensure logs are properly sequenced
             
             final_result_obj = None 
@@ -181,7 +166,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                             if history and isinstance(history[-1], messages.ModelResponse):
                                 reconstructed_step_info = await self._reconstruct_and_log_step(node.request, history[-1], step_number=self.step_count)
                                 if self.step_callback:
-                                    self.step_callback(reconstructed_step_info)
+                                    self.step_callback(reconstructed_step_info,self.get_agent_info())
                                 if reconstructed_step_info:
                                     current_step_logged = True # Mark that a full step was logged
                             else:
@@ -199,13 +184,12 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                         self.step_count % self.planning_interval == 0 and 
                         not current_step_logged and
                         not Agent.is_end_node(node)): # Don't replan if we're at the end
-                        self.logger.info(f"--- Triggering Replanning (Step Count: {self.step_count}) ---")
                         planning_step = await self._create_planning_step(task, is_first_step=False)
                         await self._reconstruct_and_log_step(step=planning_step)
                         if self.step_callback:
-                            self.step_callback(planning_step)
+                            self.step_callback(planning_step,self.get_agent_info())
                         if self.node_callback:
-                            self.node_callback(reconstruct_node(planning_step))
+                            self.node_callback(reconstruct_node(planning_step),self.get_agent_info())
                     
                     elif Agent.is_end_node(node):
                         # Increment step count for the final step
@@ -215,7 +199,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                     
                     # --- End Node Logging --- 
                     if self.node_callback:
-                        self.node_callback(reconstruct_node(node))
+                        self.node_callback(reconstruct_node(node),self.get_agent_info())
                     
                 # Process the final result
                 result = await self._process_run_result(agent_run)
@@ -635,4 +619,47 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             "=" * 80
         ]
         self.logger.info("\n".join(stats))
+
+    def get_agent_info(self) -> Dict[str, Any]:
+        """Get information about the agent.
+        
+        Returns:
+            Dict containing agent information including:
+            - name: Agent class name
+            - model: Model being used
+            - tools: List of available tools
+            - planning_interval: Steps between planning
+            - max_steps: Maximum steps allowed
+            - current_step_count: Current step count
+            - planning_step_count: Number of planning steps
+            - memory_size: Number of steps in memory
+            - state: Current agent state
+            - usage_stats: Token usage statistics if available
+        """
+        # Get token usage if available
+        usage_stats = None
+        if hasattr(self, 'agent_run'):
+            try:
+                usage_stats = self.agent_run.usage()
+            except Exception:
+                pass
+
+        return {
+            "class": self.__class__.__name__,
+            "id": self.id,
+            "name": self.name,
+            "model": self.model,
+            "tools": [tool.name for tool in self.tools],
+            "planning_interval": self.planning_interval,
+            "max_steps": self.max_steps,
+            "current_step_count": self.step_count,
+            "planning_step_count": self.planning_step_count,
+            "memory_size": len(self.memory.action_steps),
+            "state": self.memory.state,
+            "usage_stats": {
+                "request_tokens": usage_stats.request_tokens if usage_stats else None,
+                "response_tokens": usage_stats.response_tokens if usage_stats else None,
+                "total_tokens": usage_stats.total_tokens if usage_stats else None
+            } if usage_stats else None
+        }
 
