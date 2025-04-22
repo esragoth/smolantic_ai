@@ -27,44 +27,65 @@ BaseAgent
 
 ## Installation
 
-Currently, the package is best used by cloning the repository and installing in editable mode for development.
+### Production Installation
+
+You can install Smolantic AI directly from PyPI:
+
+```bash
+pip install smolantic-ai
+```
+
+### Development Installation
+
+For development purposes, you can install the package in editable mode:
 
 1.  Clone the repository:
     ```bash
     git clone https://github.com/esragoth/smolantic_ai.git
     cd smolantic_ai
     ```
+
 2.  Create and activate a virtual environment:
     ```bash
     python -m venv venv
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     ```
+
 3.  Install dependencies:
     ```bash
     pip install -r requirements.txt
     ```
-4.  Install the package in editable mode (optional, for development):
+
+4.  Install the package in editable mode:
     ```bash
     pip install -e .
     ```
-5.  **Environment Variables & API Keys:**
-    This project requires various API keys for Large Language Models (LLMs) and external tools used by the prebuilt agents.
-    
-    *   Create a `.env` file in the root directory of the project by copying the example file:
-        ```bash
-        cp .env.example .env
-        ```
-    *   Edit the `.env` file and add your actual API keys and credentials. The required variables are listed in `.env.example` and include:
-        *   **LLM Keys:** `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` (provide keys for the models you intend to use).
-        *   **Tool Keys/URLs:**
-            *   `WEATHERAPI_API_KEY` (from WeatherAPI.com)
-            *   `IPGEOLOCATION_API_KEY` (from ipgeolocation.io)
-            *   `EXCHANGERATE_API_KEY` (from e.g., exchangeratesapi.io)
-            *   `API_NINJA_API_KEY` (from api-ninjas.com - note potential free tier limits)
-            *   `JINA_API_KEY` (from Jina AI, for the reader tool)
-            *   `BRIGHTDATA_PROXY_URL` (Full proxy URL including credentials, e.g., from Bright Data, for the search tool)
 
-    The application uses `pydantic-settings` to load these variables from the `.env` file. Some tool-specific keys are loaded directly using `os.getenv` within the tool functions in `src/smolantic_ai/prebuilt_tools.py`.
+5.  For development with testing tools:
+    ```bash
+    pip install -e ".[dev]"
+    ```
+
+### Environment Setup
+
+This project requires various API keys for Large Language Models (LLMs) and external tools used by the prebuilt agents.
+
+1.  Create a `.env` file in the root directory of the project by copying the example file:
+    ```bash
+    cp .env.example .env
+    ```
+
+2.  Edit the `.env` file and add your actual API keys and credentials. The required variables are listed in `.env.example` and include:
+    *   **LLM Keys:** `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` (provide keys for the models you intend to use)
+    *   **Tool Keys/URLs:**
+        *   `WEATHERAPI_API_KEY` (from WeatherAPI.com)
+        *   `IPGEOLOCATION_API_KEY` (from ipgeolocation.io)
+        *   `EXCHANGERATE_API_KEY` (from e.g., exchangeratesapi.io)
+        *   `API_NINJA_API_KEY` (from api-ninjas.com - note potential free tier limits)
+        *   `JINA_API_KEY` (from Jina AI, for the reader tool)
+        *   `BRIGHTDATA_PROXY_URL` (Full proxy URL including credentials, e.g., from Bright Data, for the search tool)
+
+The application uses `pydantic-settings` to load these variables from the `.env` file. Some tool-specific keys are loaded directly using `os.getenv` within the tool functions in `src/smolantic_ai/prebuilt_tools.py`.
 
 ## Usage
 
