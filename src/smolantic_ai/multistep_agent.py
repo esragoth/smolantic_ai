@@ -156,7 +156,7 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
             self.logger.info(f"Agent run finished. Final result data type: {type(actual_result_data).__name__}")
 
             # Get the origin type (e.g., list for List[str])
-            origin = get_origin(self.result_type)
+            origin = get_origin(self.output_type)
             if origin is not None:
                 # For generic types, check if the actual data matches the expected type
                 if origin is list and isinstance(actual_result_data, list):
@@ -164,42 +164,42 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
                 elif origin is dict and isinstance(actual_result_data, dict):
                     return actual_result_data
                 else:
-                    self.logger.error(f"Agent run finished, but extracted data type {type(actual_result_data).__name__} does not match expected {str(self.result_type)}.")
+                    self.logger.error(f"Agent run finished, but extracted data type {type(actual_result_data).__name__} does not match expected {str(self.output_type)}.")
                     explanation_text = f"Agent finished with unexpected result type: {type(actual_result_data).__name__}. Content: {str(actual_result_data)}"
-                    if hasattr(self.result_type, 'model_fields'):
-                        if 'error' in self.result_type.model_fields:
-                            return self.result_type(error="Type mismatch", explanation=explanation_text)
-                        elif 'explanation' in self.result_type.model_fields:
-                            return self.result_type(explanation=explanation_text)
-                    return self.result_type()  # Try to create a default instance
+                    if hasattr(self.output_type, 'model_fields'):
+                        if 'error' in self.output_type.model_fields:
+                            return self.output_type(error="Type mismatch", explanation=explanation_text)
+                        elif 'explanation' in self.output_type.model_fields:
+                            return self.output_type(explanation=explanation_text)
+                    return self.output_type()  # Try to create a default instance
             else:
                 # For concrete types, use isinstance
-                if isinstance(actual_result_data, self.result_type):
+                if isinstance(actual_result_data, self.output_type):
                     return actual_result_data
                 else:
                     # Try to convert the data to the expected type
                     try:
-                        if hasattr(self.result_type, 'model_validate'):
-                            return self.result_type.model_validate(actual_result_data)
-                        elif hasattr(self.result_type, 'parse_obj'):
-                            return self.result_type.parse_obj(actual_result_data)
+                        if hasattr(self.output_type, 'model_validate'):
+                            return self.output_type.model_validate(actual_result_data)
+                        elif hasattr(self.output_type, 'parse_obj'):
+                            return self.output_type.parse_obj(actual_result_data)
                         else:
-                            return self.result_type(**actual_result_data)
+                            return self.output_type(**actual_result_data)
                     except Exception as e:
-                        self.logger.error(f"Failed to convert result to {self.result_type.__name__}: {e}")
+                        self.logger.error(f"Failed to convert result to {self.output_type.__name__}: {e}")
                         explanation_text = f"Agent finished with unexpected result type: {type(actual_result_data).__name__}. Content: {str(actual_result_data)}"
-                        if hasattr(self.result_type, 'model_fields'):
-                            if 'error' in self.result_type.model_fields:
-                                return self.result_type(error="Type mismatch", explanation=explanation_text)
-                            elif 'explanation' in self.result_type.model_fields:
-                                return self.result_type(explanation=explanation_text)
-                        return self.result_type()  # Try to create a default instance
+                        if hasattr(self.output_type, 'model_fields'):
+                            if 'error' in self.output_type.model_fields:
+                                return self.output_type(error="Type mismatch", explanation=explanation_text)
+                            elif 'explanation' in self.output_type.model_fields:
+                                return self.output_type(explanation=explanation_text)
+                        return self.output_type()  # Try to create a default instance
         else:
             self.logger.error("Agent run completed, but no result object found on agent_run.")
             explanation_text = "Agent finished without producing a final result or error."
-            if hasattr(self.result_type, 'model_fields'):
-                if 'error' in self.result_type.model_fields:
-                    return self.result_type(error="No result", explanation=explanation_text)
-                elif 'explanation' in self.result_type.model_fields:
-                    return self.result_type(explanation=explanation_text)
-            return self.result_type()  # Try to create a default instance 
+            if hasattr(self.output_type, 'model_fields'):
+                if 'error' in self.output_type.model_fields:
+                    return self.output_type(error="No result", explanation=explanation_text)
+                elif 'explanation' in self.output_type.model_fields:
+                    return self.output_type(explanation=explanation_text)
+            return self.output_type()  # Try to create a default instance 
