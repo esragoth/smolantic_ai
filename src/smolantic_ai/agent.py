@@ -447,7 +447,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         try:
             message = messages.ModelRequest(parts=[messages.UserPromptPart(content=rendered_user_prompt)])
             planning_settings = ModelSettings(stop_sequences=["<end_plan>"])
-            request_params = ModelRequestParameters(function_tools=[], allow_text_output=True, result_tools=[])
+            request_params = ModelRequestParameters(function_tools=[], allow_text_output=True, output_tools=[])
 
             self.logger.debug(f"Rendered Planning Prompt (from {prompt_template_source}):\n---\n{rendered_user_prompt}\n---")
 
