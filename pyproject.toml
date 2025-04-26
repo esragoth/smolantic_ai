@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smolantic-ai"
+dynamic = ["version"]
 authors = [
     { name = "Esra Goth", email = "beppe.wizzy@gmail.com" },
 ]
