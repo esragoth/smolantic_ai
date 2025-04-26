@@ -22,7 +22,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
 
     def __init__(
         self,
-        result_type: Type[ResultT],
+        output_type: Type[ResultT],
         deps_type: Type[DepsT],
         model: Optional[str] = None,
         tools: Optional[List[Tool]] = None,
@@ -54,7 +54,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
 
         super().__init__(
             model=model or f"{settings.model_provider}:{settings.model_name}",
-            result_type=result_type,
+            output_type=output_type,
             deps_type=deps_type,
             tools=tools,
             system_prompt=formatted_system_prompt,
@@ -64,7 +64,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         # Log initial setup after super().__init__
         self.logger.info(f"Initialized {self.__class__.__name__} with:")
         self.logger.info(f"  Model: {self.model}")
-        self.logger.info(f"  Result Type: {str(self.result_type)}")
+        self.logger.info(f"  Output Type: {str(self.output_type)}")
         self.logger.info(f"  Planning Interval: {self.planning_interval}")
         self.logger.info(f"  Max Steps: {self.max_steps}")
         self.logger.info(f"  Tools: {[tool.name for tool in tools]}")
@@ -223,14 +223,14 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
     async def _handle_run_error(self, error: Exception, error_msg: str, traceback_str: str) -> ResultT:
         """Handle errors during agent run. Subclasses can override to provide custom error handling."""
         try:
-            if hasattr(self.result_type, 'model_fields'):
-                if 'error' in self.result_type.model_fields:
-                    return self.result_type(error=error_msg, explanation=traceback_str)
-                elif 'explanation' in self.result_type.model_fields:
-                    return self.result_type(explanation=f"{error_msg}\n{traceback_str}")
-            return self.result_type()  # Try to create a default instance
+            if hasattr(self.output_type, 'model_fields'):
+                if 'error' in self.output_type.model_fields:
+                    return self.output_type(error=error_msg, explanation=traceback_str)
+                elif 'explanation' in self.output_type.model_fields:
+                    return self.output_type(explanation=f"{error_msg}\n{traceback_str}")
+            return self.output_type()  # Try to create a default instance
         except Exception as e_create:
-            self.logger.error(f"Failed to create error result {self.result_type.__name__}: {e_create}")
+            self.logger.error(f"Failed to create error result {self.output_type.__name__}: {e_create}")
             raise error  # Re-raise original error if we can't create a result
 
     async def _reconstruct_and_log_step(

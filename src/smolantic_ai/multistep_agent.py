@@ -80,7 +80,7 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
         self,
         model: Any,
         tools: List[Tool],
-        result_type: Type[ResultT],
+        output_type: Type[ResultT],
         deps_type: Type[DepsT] = type(None),
         logger_name: Optional[str] = None,
         max_steps: int = 10,
@@ -88,13 +88,14 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
         node_callback: Optional[Callable[[Node], None]] = None,
         step_callback: Optional[Callable[[Step], None]] = None,
         verbose: bool = False,
+        **kwargs
     ):
         """Initialize the agent.
 
         Args:
             model: The model to use for generating responses.
             tools: The tools available to the agent.
-            result_type: The type of result to return.
+            output_type: The type of result to return.
             deps_type: The type of dependencies required by the agent.
             logger_name: The name of the logger to use.
             max_steps: The maximum number of steps to take.
@@ -103,7 +104,7 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
         super().__init__(
             model=model,
             tools=tools,
-            result_type=result_type,
+            output_type=output_type,
             deps_type=deps_type,
             logger_name=logger_name,
             max_steps=max_steps,
@@ -111,6 +112,7 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
             verbose=verbose,
             node_callback=node_callback,
             step_callback=step_callback,
+            **kwargs
         )
         self.tools = tools
         self.memory = AgentMemory()
