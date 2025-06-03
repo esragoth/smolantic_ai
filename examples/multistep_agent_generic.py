@@ -17,6 +17,8 @@ from smolantic_ai.prebuilt_tools import (
 )
 from smolantic_ai.config import settings_manager
 from smolantic_ai.models import Node, Step, pretty_print_node
+from smolantic_ai.agent import AgentInfo
+
 class GoogleSearchResult(BaseModel):
     title: str
     url: str
@@ -29,10 +31,10 @@ class FinalAnswer(BaseModel):
 
 
 
-def node_callback(node: Node):
+def node_callback(node: Node, agent_info: AgentInfo):
     print(pretty_print_node(node))
 
-def step_callback(step: Step):
+def step_callback(step: Step, agent_info: AgentInfo):
     print(f"Step: {step.step_type}")
 
 async def main():
@@ -41,7 +43,7 @@ async def main():
     
     # Create agent with explicit model settings
     agent = MultistepAgent(
-        result_type=FinalAnswer,
+        output_type=FinalAnswer,
         tools=[get_weather_tool, search_google_tool, timezone_tool],
         planning_interval=3,
         model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}",
@@ -70,6 +72,10 @@ async def main():
         print("Tokyo Weather: ", result.tokyo_weather)
         for search_result in result.google_search:
             print(f"Title: {search_result.title}, URL: {search_result.url}")
+        # Print memory contents for verification
+        print("\n--- Agent Memory Steps ---")
+        for i, step in enumerate(agent.memory.action_steps):
+            print(f"Step {i+1} ({type(step).__name__}):\n{step.to_string_summary()}\n")
     except Exception as e:
         print(f"Error: {str(e)}")
 

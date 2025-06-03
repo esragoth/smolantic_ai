@@ -84,6 +84,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         # Set name after super().__init__ to ensure it's not overwritten
         self.name = name or self.__class__.__name__
         
+        # Ensure self.tools is always set
+        self.tools = tools or []
+        
         # Log initial setup after super().__init__
         self.logger.info(f"Initialized {self.__class__.__name__} with:")
         self.logger.info(f"  Model: {self.model}")
@@ -349,6 +352,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                     step_number=self.step_count
                 )
 
+                # Add the action step to memory
+                self.memory.add_step(action_step)
+
                 # Log the reconstructed step details
                 if self.verbose:
                     self.logger.log_step("Action Step", action_step.to_string_summary())
@@ -491,6 +497,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             planning_step.action_plan = plan
             planning_step.input_messages = [Message(role=MessageRole.USER, content=rendered_user_prompt)]
             planning_step.output_messages = [Message(role=MessageRole.ASSISTANT, content=response_str)]
+
+            # Add the planning step to memory
+            self.memory.add_step(planning_step)
 
         except Exception as e:
             self.logger.error(f"Error during planning call: {type(e).__name__}: {e}")
