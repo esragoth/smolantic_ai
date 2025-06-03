@@ -46,7 +46,7 @@ async def main():
         output_type=FinalAnswer,
         tools=[get_weather_tool, search_google_tool, timezone_tool],
         planning_interval=3,
-        model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}",
+        model="openai:gpt-4.1",
         node_callback=node_callback,
     )
 

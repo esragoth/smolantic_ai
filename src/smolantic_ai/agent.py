@@ -89,7 +89,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         
         # Log initial setup after super().__init__
         self.logger.info(f"Initialized {self.__class__.__name__} with:")
-        self.logger.info(f"  Model: {self.model}")
+        self.logger.info(f"  Model: {self.model.model_name}")
         self.logger.info(f"  Output Type: {str(self.output_type)}")
         self.logger.info(f"  Planning Interval: {self.planning_interval}")
         self.logger.info(f"  Max Steps: {self.max_steps}")
@@ -149,7 +149,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             settings_info = (
                 f"Starting {self.__class__.__name__} run.\n" 
                 f"  Task: {task[:100]}...\n"
-                f"  Model: {settings.model_provider}:{settings.model_name}\n"
+                f"  Model: {self.model.model_name}\n"
                 f"  Planning Interval: {self.planning_interval}\n"
                 f"  Max Steps: {self.max_steps}\n"
                 f"  Tools: {[tool.name for tool in self.tools]}"
