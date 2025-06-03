@@ -17,6 +17,20 @@ import uuid
 DepsT = TypeVar('DepsT')
 ResultT = TypeVar('ResultT', bound=BaseModel)
 
+class AgentInfo(BaseModel):
+    class_: str
+    id: str
+    name: str
+    model: str
+    tools: List[str]
+    planning_interval: Optional[int]
+    max_steps: int
+    current_step_count: int
+    planning_step_count: int
+    memory_size: int
+    state: Any
+    usage_stats: Optional[Dict[str, Optional[int]]]
+
 class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
     """Abstract Base Class for agents with shared planning and logging capabilities."""
 
@@ -29,10 +43,11 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         planning_interval: Optional[int] = None,
         logger_name: Optional[str] = None,
         system_prompt: Optional[str] = None,
-        node_callback: Optional[Callable[[Node], None]] = None,
-        step_callback: Optional[Callable[[Step], None]] = None,
+        node_callback: Optional[Callable[[Node, 'AgentInfo'], None]] = None,
+        step_callback: Optional[Callable[[Step, 'AgentInfo'], None]] = None,
         verbose: bool = False,
         max_steps: int = 20,
+        name: Optional[str] = None,
         **kwargs
     ):
         settings = settings_manager.settings
@@ -45,12 +60,17 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         self.memory = AgentMemory() # Initialize memory
         self.verbose = verbose
         self.id = str(uuid.uuid4())
+        
         if self.planning_interval is not None and self.planning_interval < 2:
             raise ValueError("planning_interval must be None or >= 2")
         self.node_callback = node_callback
         self.step_callback = step_callback
         # --- Subclass must provide formatted prompt and final tools ---
         formatted_system_prompt = self._format_system_prompt(system_prompt or self.default_system_prompt_template)
+
+        # Ensure name is passed through to parent class
+        if name is not None:
+            kwargs['name'] = name
 
         super().__init__(
             model=model or f"{settings.model_provider}:{settings.model_name}",
@@ -60,6 +80,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             system_prompt=formatted_system_prompt,
             **kwargs
         )
+        
+        # Set name after super().__init__ to ensure it's not overwritten
+        self.name = name or self.__class__.__name__
         
         # Log initial setup after super().__init__
         self.logger.info(f"Initialized {self.__class__.__name__} with:")
@@ -139,9 +162,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             if self.planning_interval: # Check if planning is enabled (interval is set)
                 planning_node = await self._create_planning_step(task, is_first_step=True)
                 if self.step_callback:
-                    self.step_callback(planning_node,self.get_agent_info())
+                    self.step_callback(planning_node, self.get_agent_info())
                 if self.node_callback:
-                    self.node_callback(reconstruct_node(planning_node),self.get_agent_info())
+                    self.node_callback(reconstruct_node(planning_node), self.get_agent_info())
                 # Add a small delay to ensure logs are properly sequenced
             
             final_result_obj = None 
@@ -166,7 +189,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                             if history and isinstance(history[-1], messages.ModelResponse):
                                 reconstructed_step_info = await self._reconstruct_and_log_step(node.request, history[-1], step_number=self.step_count)
                                 if self.step_callback:
-                                    self.step_callback(reconstructed_step_info,self.get_agent_info())
+                                    self.step_callback(reconstructed_step_info, self.get_agent_info())
                                 if reconstructed_step_info:
                                     current_step_logged = True # Mark that a full step was logged
                             else:
@@ -187,9 +210,9 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                         planning_step = await self._create_planning_step(task, is_first_step=False)
                         await self._reconstruct_and_log_step(step=planning_step)
                         if self.step_callback:
-                            self.step_callback(planning_step,self.get_agent_info())
+                            self.step_callback(planning_step, self.get_agent_info())
                         if self.node_callback:
-                            self.node_callback(reconstruct_node(planning_step),self.get_agent_info())
+                            self.node_callback(reconstruct_node(planning_step), self.get_agent_info())
                     
                     elif Agent.is_end_node(node):
                         # Increment step count for the final step
@@ -199,7 +222,7 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                     
                     # --- End Node Logging --- 
                     if self.node_callback:
-                        self.node_callback(reconstruct_node(node),self.get_agent_info())
+                        self.node_callback(reconstruct_node(node), self.get_agent_info())
                     
                 # Process the final result
                 result = await self._process_run_result(agent_run)
@@ -620,46 +643,30 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         ]
         self.logger.info("\n".join(stats))
 
-    def get_agent_info(self) -> Dict[str, Any]:
-        """Get information about the agent.
-        
-        Returns:
-            Dict containing agent information including:
-            - name: Agent class name
-            - model: Model being used
-            - tools: List of available tools
-            - planning_interval: Steps between planning
-            - max_steps: Maximum steps allowed
-            - current_step_count: Current step count
-            - planning_step_count: Number of planning steps
-            - memory_size: Number of steps in memory
-            - state: Current agent state
-            - usage_stats: Token usage statistics if available
-        """
-        # Get token usage if available
+    def get_agent_info(self) -> 'AgentInfo':
+        """Get information about the agent as an AgentInfo model."""
         usage_stats = None
         if hasattr(self, 'agent_run'):
             try:
                 usage_stats = self.agent_run.usage()
             except Exception:
                 pass
-
-        return {
-            "class": self.__class__.__name__,
-            "id": self.id,
-            "name": self.name,
-            "model": self.model,
-            "tools": [tool.name for tool in self.tools],
-            "planning_interval": self.planning_interval,
-            "max_steps": self.max_steps,
-            "current_step_count": self.step_count,
-            "planning_step_count": self.planning_step_count,
-            "memory_size": len(self.memory.action_steps),
-            "state": self.memory.state,
-            "usage_stats": {
+        return AgentInfo(
+            class_=self.__class__.__name__,
+            id=self.id,
+            name=self.name or self.__class__.__name__,
+            model=str(self.model),
+            tools=[tool.name for tool in self.tools],
+            planning_interval=self.planning_interval,
+            max_steps=self.max_steps,
+            current_step_count=self.step_count,
+            planning_step_count=self.planning_step_count,
+            memory_size=len(self.memory.action_steps),
+            state=self.memory.state,
+            usage_stats={
                 "request_tokens": usage_stats.request_tokens if usage_stats else None,
                 "response_tokens": usage_stats.response_tokens if usage_stats else None,
                 "total_tokens": usage_stats.total_tokens if usage_stats else None
             } if usage_stats else None
-        }
+        )
 

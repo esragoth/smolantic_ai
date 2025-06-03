@@ -26,7 +26,7 @@ from .models import (
 from jinja2 import Template
 from pydantic_ai import messages as pydantic_ai_messages
 from dataclasses import dataclass
-from .agent import BaseAgent
+from .agent import BaseAgent, AgentInfo
 import json
 from typing import get_origin
 
@@ -40,6 +40,8 @@ class MultistepAgentResult(AgentResult):
     """Result of a multistep agent run."""
 
     steps: List[ActionStep] = Field(default_factory=list)
+    error: Optional[str] = None
+    explanation: Optional[str] = None
     """List of steps taken by the agent."""
 
     @classmethod
@@ -85,9 +87,10 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
         logger_name: Optional[str] = None,
         max_steps: int = 10,
         planning_interval: Optional[int] = None,
-        node_callback: Optional[Callable[[Node], None]] = None,
-        step_callback: Optional[Callable[[Step], None]] = None,
+        node_callback: Optional[Callable[[Node, AgentInfo], None]] = None,
+        step_callback: Optional[Callable[[Step, AgentInfo], None]] = None,
         verbose: bool = False,
+        name: Optional[str] = None,
         **kwargs
     ):
         """Initialize the agent.
@@ -100,7 +103,15 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
             logger_name: The name of the logger to use.
             max_steps: The maximum number of steps to take.
             planning_interval: The number of steps between planning steps.
+            node_callback: Callback function for node events.
+            step_callback: Callback function for step events.
+            verbose: Whether to enable verbose logging.
+            name: Custom name for the agent instance.
         """
+        # Ensure name is passed through if provided
+        if name is not None:
+            kwargs['name'] = name
+            
         super().__init__(
             model=model,
             tools=tools,
