@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, TypeVar, cast, Type, Callable
 from pydantic import Field
 from pydantic import BaseModel
 from pydantic_ai import Tool 
+from pydantic_ai.agent import AgentRun
 from pydantic_ai import UserPromptNode, ModelRequestNode, CallToolsNode
 from pydantic_graph import End
 from .models import (
@@ -29,6 +30,7 @@ from dataclasses import dataclass
 from .agent import BaseAgent, AgentInfo
 import json
 from typing import get_origin
+from pydantic_ai.agent import RunContext
 
 logger = get_logger(__name__)
 
@@ -91,6 +93,7 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
         step_callback: Optional[Callable[[Step, AgentInfo], None]] = None,
         verbose: bool = False,
         name: Optional[str] = None,
+        enable_initial_planning: bool = True,
         **kwargs
     ):
         """Initialize the agent.
@@ -107,6 +110,7 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
             step_callback: Callback function for step events.
             verbose: Whether to enable verbose logging.
             name: Custom name for the agent instance.
+            enable_initial_planning: Whether to enable initial planning phase.
         """
         # Ensure name is passed through if provided
         if name is not None:
@@ -127,6 +131,7 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
         )
         self.tools = tools
         self.memory = AgentMemory()
+        self.enable_initial_planning = enable_initial_planning
 
     def add_tool(self, tool: Tool) -> None:
         """Add a single tool to the agent."""
@@ -214,3 +219,31 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
                 elif 'explanation' in self.output_type.model_fields:
                     return self.output_type(explanation=explanation_text)
             return self.output_type()  # Try to create a default instance 
+
+    async def _process_input(self, agent_run: AgentRun, user_input: str) -> ResultT:
+        """Process a single user input in an existing agent run.
+        
+        Args:
+            agent_run: The current agent run
+            user_input: The user's input message
+            
+        Returns:
+            The agent's response
+        """
+        try:
+            # Create a user prompt node
+            user_prompt_node = UserPromptNode(user_prompt=user_input)
+            
+            # Process the node
+            result = await self._process_node(agent_run, user_prompt_node)
+            
+            # Extract the final result
+            if isinstance(result, End):
+                if hasattr(result, 'result'):
+                    return result.result
+                raise ValueError("End node has no result")
+            raise ValueError(f"Expected End node, got {type(result)}")
+            
+        except Exception as e:
+            self.logger.error(f"Error processing input: {str(e)}")
+            raise e
