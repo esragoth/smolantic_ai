@@ -2,8 +2,10 @@ import abc
 from typing import Any, Dict, List, Optional, TypeVar, Union, Type, AsyncIterator, Generic, Callable
 from pydantic import BaseModel
 from pydantic_ai import Agent, Tool, UserPromptNode, ModelRequestNode, CallToolsNode, messages
-from pydantic_ai.agent import AgentRunResult
-from pydantic_ai.models import ModelResponse, ModelSettings, ModelRequestParameters
+from pydantic_ai.run import AgentRunResult
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.settings import ModelSettings
+from pydantic_ai.models import ModelRequestParameters
 from pydantic_graph import End
 from jinja2 import Template
 import traceback
@@ -131,8 +133,12 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def _process_run_result(self, agent_run: AgentRunResult) -> ResultT:
-        """Process the final result from the agent run."""
+    async def _process_run_result(self, agent_run: Any) -> ResultT:
+        """Process the final result from the agent run.
+        
+        Can accept either AgentRun (from iter()) or AgentRunResult (from run()).
+        AgentRun has result attribute, AgentRunResult has output attribute.
+        """
         pass
     # --- End Abstract methods ---
 
@@ -611,8 +617,8 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
 
         # Get final result if available
         final_result = None
-        if hasattr(self, 'agent_run') and hasattr(self.agent_run, 'result'):
-            final_result = self.agent_run.result
+        if hasattr(self, 'agent_run') and hasattr(self.agent_run, 'output'):
+            final_result = self.agent_run.output
 
         # Format the result output based on its type
         result_output = 'N/A'
@@ -641,8 +647,8 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             "=" * 80,
             "Token Usage",
             "-" * 40,
-            f"Request Tokens: {usage_stats.request_tokens if usage_stats else 'N/A'}",
-            f"Response Tokens: {usage_stats.response_tokens if usage_stats else 'N/A'}",
+            f"Request Tokens: {usage_stats.input_tokens if usage_stats else 'N/A'}",
+            f"Response Tokens: {usage_stats.output_tokens if usage_stats else 'N/A'}",
             f"Total Tokens: {usage_stats.total_tokens if usage_stats else 'N/A'}",
             "=" * 80,
             "Final Result",
@@ -673,8 +679,8 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             memory_size=len(self.memory.action_steps),
             state=self.memory.state,
             usage_stats={
-                "request_tokens": usage_stats.request_tokens if usage_stats else None,
-                "response_tokens": usage_stats.response_tokens if usage_stats else None,
+                "request_tokens": usage_stats.input_tokens if usage_stats else None,
+                "response_tokens": usage_stats.output_tokens if usage_stats else None,
                 "total_tokens": usage_stats.total_tokens if usage_stats else None
             } if usage_stats else None
         )

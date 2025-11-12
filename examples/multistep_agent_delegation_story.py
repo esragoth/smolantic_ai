@@ -27,18 +27,18 @@ logger = get_logger(__name__)
 
 # --- Define the Delegate Agent (using MultistepAgent) ---
 # This agent specializes in generating chapter titles
-chapter_title_agent = MultistepAgent[None, List[str]](
+chapter_title_agent = MultistepAgent(
     # Use a potentially faster/cheaper model for this focused task
     model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}", # Example: 'google:gemini-1.5-flash-latest'
-    result_type=List[str],
+    output_type=List[str],
     tools=[],
     logger_name="ChapterTitleAgent",
 )
 
 # --- Define the Story Writer Agent (New) ---
-story_writer_agent = MultistepAgent[None, str](
+story_writer_agent = MultistepAgent(
     model="openai:gpt-4.1",
-    result_type=str,
+    output_type=str,
     tools=[],
     logger_name="StoryWriterAgent",
     planning_interval=None,
@@ -100,9 +100,9 @@ async def story_writer_factory(ctx: RunContext[None], chapter_title: str) -> str
 chapter_title_tool = Tool(chapter_title_factory)
 story_writer_tool = Tool(story_writer_factory) # Create tool instance for the new function
 
-story_planner_agent = MultistepAgent[None, StoryChapters]( # Expect Dict[title, story] as result
+story_planner_agent = MultistepAgent( # Expect StoryChapters as result
     model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}", # Example: 'openai:gpt-4o-mini'
-    result_type=StoryChapters, # Updated result type
+    output_type=StoryChapters, # Updated result type
     tools=[chapter_title_tool, story_writer_tool], # Pass BOTH tool instances here
     planning_interval=None, # Disable planning for this simple task
     logger_name="StoryPlannerAgent",
@@ -136,10 +136,16 @@ async def main():
 
         # Print the final accumulated usage
         print("\nFinal Usage:")
-        if hasattr(run_result, 'usage') and run_result.usage is not None:
-            print(f"Total Tokens: {run_result.usage.total_tokens}")
-            print(f"Prompt Tokens: {run_result.usage.prompt_tokens}")
-            print(f"Completion Tokens: {run_result.usage.completion_tokens}")
+        # Usage is available from the agent's last run, not from the result object
+        if hasattr(story_planner_agent, 'agent_run') and story_planner_agent.agent_run:
+            try:
+                usage = story_planner_agent.agent_run.usage()
+                if usage:
+                    print(f"Total Tokens: {usage.total_tokens}")
+                    print(f"Input Tokens: {usage.input_tokens}")
+                    print(f"Output Tokens: {usage.output_tokens}")
+            except:
+                pass
         else:
             print("Usage information not available")
 

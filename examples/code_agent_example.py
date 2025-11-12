@@ -16,14 +16,14 @@ class FinalAnswer(BaseModel):
 load_dotenv()
 
 def node_callback(node, agent_info):
-    print(f"ID: {agent_info.get('id')}")
-    print(f"Name: {agent_info.get('name')}")
-    print(f"Current Step: {agent_info.get('current_step_count')}")
+    print(f"ID: {agent_info.id}")
+    print(f"Name: {agent_info.name}")
+    print(f"Current Step: {agent_info.current_step_count}")
     print(node.to_string_summary())
 
 def step_callback(step, agent_info):
-    print(f"Step: {step.id}")
-    print(f"Agent Info: {agent_info}")
+    print(f"Step: {step.step_number if hasattr(step, 'step_number') else 'N/A'}")
+    print(f"Agent Info: ID={agent_info.id}, Name={agent_info.name}, Steps={agent_info.current_step_count}")
 
 async def main():
 

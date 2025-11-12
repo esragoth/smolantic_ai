@@ -39,10 +39,11 @@ async def main():
 
     # Instantiate the MultistepAgent
     # It uses the default model specified in smolantic_ai.config if not overridden
-    agent = MultistepAgent[
-        FinalAnswer # Specify the expected final result type
-    ](
+    from smolantic_ai.config import settings_manager
+    agent = MultistepAgent(
+        model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}",
         tools=tools,
+        output_type=FinalAnswer,
         # You can optionally specify the model, planning interval, max steps, etc.
         # model="openai:gpt-4-turbo",
         planning_interval=3, 

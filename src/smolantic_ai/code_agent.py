@@ -2,8 +2,8 @@
 from typing import Any, Optional, List, Union, Dict, TypeVar, Type, Callable, AsyncIterator
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext, Tool, UserPromptNode, ModelRequestNode, CallToolsNode, messages
-from pydantic_ai.agent import AgentRunResult
-from pydantic_ai.models import ModelResponse
+from pydantic_ai.run import AgentRunResult
+from pydantic_ai.messages import ModelResponse
 from pydantic_graph import End
 from .executors import PythonExecutor, LocalPythonExecutor, E2BExecutor, DockerExecutor, CodeExecutionResult
 from .config import settings_manager
@@ -58,14 +58,16 @@ class CodeAgent(BaseAgent[DepsT, Union[CodeResult, ResultT]]):
         self.authorized_imports = authorized_imports or []
         self.max_print_outputs_length = max_print_outputs_length
         self.executor_type = executor_type
-        self.tools = tools
-        self.tools = self._get_final_tools()
+        self.base_tools = tools or []  # Store base tools before calling _get_final_tools
         if '*' in self.authorized_imports:
             self.logger.warning("Caution: '*' in authorized_imports allows any package to be imported")
         
+        # Get final tools (base + python_interpreter)
+        self.tools = self._get_final_tools()
+        
         # Initialize base agent
         super().__init__(
-            result_type=result_type or CodeResult,
+            output_type=result_type or CodeResult,
             deps_type=deps_type,
             model=model,
             tools=self.tools,
@@ -118,7 +120,7 @@ class CodeAgent(BaseAgent[DepsT, Union[CodeResult, ResultT]]):
             function=self._execute_code_tool_func,
         )
         # Combine user-provided tools with the internal one
-        return self.tools + [self.python_interpreter_tool]
+        return self.base_tools + [self.python_interpreter_tool]
 
     def _format_system_prompt(self, template: str) -> str:
         """Format the system prompt template with code-specific context."""
@@ -134,53 +136,61 @@ class CodeAgent(BaseAgent[DepsT, Union[CodeResult, ResultT]]):
             self.logger.error(f"Template: {template}")
             return template
 
-    async def _process_run_result(self, agent_run: AgentRunResult) -> Union[CodeResult, ResultT]:
+    async def _process_run_result(self, agent_run: Any) -> Union[CodeResult, ResultT]:
         """Process the final result from the agent run."""
-        if hasattr(agent_run, 'result') and agent_run.result is not None:
-                    if hasattr(agent_run.result, 'data'):
-                        actual_result_data = agent_run.result.data
-                    else:
-                        actual_result_data = agent_run.result
+        # Handle both AgentRun (has result) and AgentRunResult (has output)
+        actual_result_data = None
+        if hasattr(agent_run, 'output') and agent_run.output is not None:
+            # AgentRunResult case
+            actual_result_data = agent_run.output
+        elif hasattr(agent_run, 'result') and agent_run.result is not None:
+            # AgentRun case - result might be FinalResult with output attribute
+            result = agent_run.result
+            if hasattr(result, 'output'):
+                actual_result_data = result.output
+            else:
+                actual_result_data = result
+        
+        if actual_result_data is None:
+            self.logger.error("Agent run completed, but no result object found on agent_run.")
+            explanation_text = "Agent finished without producing a final result or error."
+            error_text = "No result object"
+            try:
+                if hasattr(self.output_type, 'model_fields') and \
+                   'answer' in self.output_type.model_fields and \
+                   'explanation' in self.output_type.model_fields:
+                     return self.output_type(answer=error_text, explanation=explanation_text)
+                else:
+                     try:
+                          return self.output_type(explanation=explanation_text, error=error_text)
+                     except TypeError:
+                          self.logger.warning(f"Could not instantiate {self.output_type.__name__} with error details, falling back to CodeResult.")
+                          return CodeResult(
+                             code="# No result generated", result=None,
+                             explanation=explanation_text, error=error_text,
+                             execution_logs=""
+                          )
+            except Exception as e_create:
+                self.logger.error(f"Failed to create fallback result {self.output_type.__name__}: {e_create}")
+                return CodeResult(
+                    code="# No result generated", result=None,
+                    explanation=explanation_text + f" (Error creating result object: {e_create})",
+                    error=error_text,
+                    execution_logs=""
+                )
 
-                    self.logger.info(f"Agent run finished. Final result data type: {type(actual_result_data).__name__}")
+        self.logger.info(f"Agent run finished. Final result data type: {type(actual_result_data).__name__}")
 
-                    if isinstance(actual_result_data, self.result_type):
-                        return actual_result_data 
-                    else:
-                        self.logger.error(f"Agent run finished, but extracted data type {type(actual_result_data).__name__} does not match expected {self.result_type.__name__}.")
-                        explanation_text = f"Agent finished with unexpected result type: {type(actual_result_data).__name__}. Content: {str(actual_result_data)}"
-                        return CodeResult(
-                            code="# Unexpected result type", result=str(actual_result_data),
-                            explanation=explanation_text, error="Type mismatch",
-                            execution_logs=""
-                        )
+        if isinstance(actual_result_data, self.output_type):
+            return actual_result_data 
         else:
-                    self.logger.error("Agent run completed, but no result object found on agent_run.")
-                    explanation_text = "Agent finished without producing a final result or error."
-                    error_text = "No result object"
-                    try:
-                        if hasattr(self.result_type, 'model_fields') and \
-                           'answer' in self.result_type.model_fields and \
-                           'explanation' in self.result_type.model_fields:
-                             return self.result_type(answer=error_text, explanation=explanation_text)
-                        else:
-                             try:
-                                  return self.result_type(explanation=explanation_text, error=error_text)
-                             except TypeError:
-                                  self.logger.warning(f"Could not instantiate {self.result_type.__name__} with error details, falling back to CodeResult.")
-                                  return CodeResult(
-                                     code="# No result generated", result=None,
-                                     explanation=explanation_text, error=error_text,
-                                     execution_logs=""
-                                  )
-                    except Exception as e_create:
-                        self.logger.error(f"Failed to create fallback result {self.result_type.__name__}: {e_create}")
-                        return CodeResult(
-                            code="# No result generated", result=None,
-                            explanation=explanation_text + f" (Error creating result object: {e_create})",
-                            error=error_text,
-                            execution_logs=""
-                        )
+            self.logger.error(f"Agent run finished, but extracted data type {type(actual_result_data).__name__} does not match expected {self.output_type.__name__}.")
+            explanation_text = f"Agent finished with unexpected result type: {type(actual_result_data).__name__}. Content: {str(actual_result_data)}"
+            return CodeResult(
+                code="# Unexpected result type", result=str(actual_result_data),
+                explanation=explanation_text, error="Type mismatch",
+                execution_logs=""
+            )
 
     # --- CodeAgent-specific Methods ---
     def _create_executor(
@@ -289,11 +299,11 @@ class CodeAgent(BaseAgent[DepsT, Union[CodeResult, ResultT]]):
     async def _handle_run_error(self, error: Exception, error_msg: str, traceback_str: str) -> Union[CodeResult, ResultT]:
         """Handle errors during agent run with code-specific error handling."""
         try:
-            if hasattr(self.result_type, 'model_fields'):
-                if 'error' in self.result_type.model_fields:
-                    return self.result_type(error=error_msg, explanation=traceback_str)
-                elif 'explanation' in self.result_type.model_fields:
-                    return self.result_type(explanation=f"{error_msg}\n{traceback_str}")
+            if hasattr(self.output_type, 'model_fields'):
+                if 'error' in self.output_type.model_fields:
+                    return self.output_type(error=error_msg, explanation=traceback_str)
+                elif 'explanation' in self.output_type.model_fields:
+                    return self.output_type(explanation=f"{error_msg}\n{traceback_str}")
             # Fallback to CodeResult if we can't create the expected result type
             return CodeResult(
                 code="# Critical error",
@@ -303,7 +313,7 @@ class CodeAgent(BaseAgent[DepsT, Union[CodeResult, ResultT]]):
                 error=str(error)
             )
         except Exception as e_create:
-            self.logger.error(f"Failed to create error result {self.result_type.__name__}: {e_create}")
+            self.logger.error(f"Failed to create error result {self.output_type.__name__}: {e_create}")
             # Ultimate fallback to CodeResult
             return CodeResult(
                 code="# Critical error",

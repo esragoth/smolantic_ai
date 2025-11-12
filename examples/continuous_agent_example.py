@@ -114,8 +114,8 @@ async def main():
                             if usage:
                                 token_usage = {
                                     'total': usage.total_tokens,
-                                    'input': usage.request_tokens,
-                                    'output': usage.response_tokens
+                                    'input': usage.input_tokens,
+                                    'output': usage.output_tokens
                                 }
                         except Exception:
                             pass
@@ -129,8 +129,8 @@ async def main():
                             if usage:
                                 token_usage = {
                                     'total': usage.total_tokens,
-                                    'input': usage.request_tokens,
-                                    'output': usage.response_tokens
+                                    'input': usage.input_tokens,
+                                    'output': usage.output_tokens
                                 }
                         except Exception:
                             pass

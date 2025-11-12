@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, TypeVar, Type, Callable
 from pydantic import BaseModel
 from pydantic_ai import Tool
-from pydantic_ai.agent import AgentRun
+from pydantic_ai.run import AgentRun
 from .multistep_agent import MultistepAgent
 from .models import Message, MessageRole
 from .agent import AgentInfo
@@ -216,8 +216,8 @@ class ContinuousAgent(MultistepAgent[None, ResultT]):
                             if usage:
                                 partial_result._token_usage = {
                                     'total': usage.total_tokens,
-                                    'input': usage.request_tokens,
-                                    'output': usage.response_tokens
+                                    'input': usage.input_tokens,
+                                    'output': usage.output_tokens
                                 }
                     except Exception:
                         pass
@@ -239,8 +239,8 @@ class ContinuousAgent(MultistepAgent[None, ResultT]):
                             if usage:
                                 default_result._token_usage = {
                                     'total': usage.total_tokens,
-                                    'input': usage.request_tokens,
-                                    'output': usage.response_tokens
+                                    'input': usage.input_tokens,
+                                    'output': usage.output_tokens
                                 }
                     except Exception:
                         pass
@@ -298,12 +298,6 @@ class ContinuousAgent(MultistepAgent[None, ResultT]):
                 result_data = self._agent_run.output
                 if self.verbose:
                     print(f"Extracted from agent_run.output: {type(result_data)}")
-            elif hasattr(self._agent_run, 'result') and self._agent_run.result is not None:
-                result_data = self._agent_run.result
-                if hasattr(result_data, 'output'):
-                    result_data = result_data.output
-                if self.verbose:
-                    print(f"Extracted from agent_run.result: {type(result_data)}")
             elif hasattr(end_node, 'result') and end_node.result is not None:
                 result_data = end_node.result
                 if hasattr(result_data, 'output'):

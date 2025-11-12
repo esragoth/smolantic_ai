@@ -39,14 +39,14 @@ class Failed(BaseModel):
     reason: str = Field(description="Reason why the agent failed.")
 
 # --- Agent 1: Need Identification (MultistepAgent) ---
-need_identifier_agent = MultistepAgent[None, IdentifiedNeed](
+need_identifier_agent = MultistepAgent(
     model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}", # Faster model for classification
-    result_type=IdentifiedNeed,
+    tools=[],
+    output_type=IdentifiedNeed,
     system_prompt=(
         'Identify the user\'s general need category (Entertainment, Productivity, Learning, Travel, Code) '
         'and any key details based on their request. Return the IdentifiedNeed object.'
     ),
-    request_limit=5,
     logger_name="NeedIdentifierAgent",
     planning_interval=None, # Disable planning for this simple task
 )
@@ -57,7 +57,6 @@ recommendation_code_agent = CodeAgent(
     model=f"{settings_manager.settings.model_provider}:{settings_manager.settings.model_name}", # More capable model for code/complex reasoning
     # No specific tools needed here, relies on code execution
     executor_type="local", # Or "docker", "e2b" based on your setup
-    request_limit=8,
     logger_name="RecommendationCodeAgent",
 )
 
@@ -69,19 +68,17 @@ async def get_need_category() -> Union[IdentifiedNeed, None]:
             prompt = Prompt.ask(
                 f"[Attempt {attempt+1}/3] What are you looking for help with today? (e.g., 'movie suggestion', 'python script for web scraping', 'task manager app')"
             )
-            # MultistepAgent run now returns AgentRunResult
+            # MultistepAgent run now returns the output directly
             run_result = await need_identifier_agent.run(prompt)
             
-            # Extract data from the result
-            result_data = run_result.data
-
-            if isinstance(result_data, IdentifiedNeed):
-                logger.info(f"Identified Need: {result_data.need_category}, Details: {result_data.details}")
-                return result_data
+            # The result is already the output type (IdentifiedNeed)
+            if isinstance(run_result, IdentifiedNeed):
+                logger.info(f"Identified Need: {run_result.need_category}, Details: {run_result.details}")
+                return run_result
             else:
-                # This case might indicate an internal agent error if result_type wasn't met
-                logger.warning(f"Need identifier returned unexpected type: {type(result_data)}. Assuming failure.")
-                # You might want to inspect 'result' further if MultistepAgent could return Failure models
+                # This case might indicate an internal agent error if output_type wasn't met
+                logger.warning(f"Need identifier returned unexpected type: {type(run_result)}. Assuming failure.")
+                # You might want to inspect the result further if MultistepAgent could return Failure models
 
         except Exception as e:
             logger.error(f"Error in get_need_category (attempt {attempt+1}): {e}", exc_info=True)

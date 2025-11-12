@@ -56,7 +56,8 @@ def unified_model_logic(messages: list[ModelMessage], info: AgentInfo) -> ModelR
                 args={
                     'code': "def add(a, b):\\n  return a + b",
                     'result': "Test execution result",
-                    'explanation': "Test code response for CodeAgent"
+                    'explanation': "Test code response for CodeAgent",
+                    'execution_logs': ""
                 },
                 tool_call_id='code_final'
             )])
@@ -85,7 +86,8 @@ def unified_model_logic(messages: list[ModelMessage], info: AgentInfo) -> ModelR
                 args={
                     'code': "def add(a, b):\\n  return a + b",
                     'result': "Test execution result",
-                    'explanation': "Test code response for CodeAgent"
+                    'explanation': "Test code response for CodeAgent",
+                    'execution_logs': ""
                 },
                 tool_call_id='code_final_retry'
             )])
@@ -104,7 +106,7 @@ def multistep_agent_test_model():
     agent = MultistepAgent[TestDeps, WeatherResult](
         model=FunctionModel(unified_model_logic),
         tools=[],
-        result_type=WeatherResult,
+        output_type=WeatherResult,
         deps_type=TestDeps
     )
     yield agent
@@ -122,7 +124,7 @@ def multistep_agent_function_model():
     agent = MultistepAgent[TestDeps, WeatherResult](
         model=FunctionModel(unified_model_logic),
         tools=[get_weather_tool],
-        result_type=WeatherResult,
+        output_type=WeatherResult,
         deps_type=TestDeps
     )
     yield agent
