@@ -136,7 +136,8 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
     def add_tool(self, tool: Tool) -> None:
         """Add a single tool to the agent."""
         self.tools.append(tool)
-        self.logger.log_action({"action": "add_tool", "tool": tool.name})
+        if self.verbose:
+            self.logger.log_action({"action": "add_tool", "tool": tool.name})
 
     def add_tools(self, tools: List[Tool]) -> None:
         """Add multiple tools to the agent."""
@@ -186,7 +187,8 @@ class MultistepAgent(BaseAgent[DepsT, ResultT]):
                     return self.output_type(explanation=explanation_text)
             return self.output_type()  # Try to create a default instance
 
-        self.logger.info(f"Agent run finished. Final result data type: {type(actual_result_data).__name__}")
+        if self.verbose:
+            self.logger.info(f"Agent run finished. Final result data type: {type(actual_result_data).__name__}")
 
         # Get the origin type (e.g., list for List[str])
         origin = get_origin(self.output_type)

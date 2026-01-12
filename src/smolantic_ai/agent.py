@@ -90,12 +90,13 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
         self.tools = tools or []
         
         # Log initial setup after super().__init__
-        self.logger.info(f"Initialized {self.__class__.__name__} with:")
-        self.logger.info(f"  Model: {self.model.model_name}")
-        self.logger.info(f"  Output Type: {str(self.output_type)}")
-        self.logger.info(f"  Planning Interval: {self.planning_interval}")
-        self.logger.info(f"  Max Steps: {self.max_steps}")
-        self.logger.info(f"  Tools: {[tool.name for tool in tools]}")
+        if self.verbose:
+            self.logger.info(f"Initialized {self.__class__.__name__} with:")
+            self.logger.info(f"  Model: {self.model.model_name}")
+            self.logger.info(f"  Output Type: {str(self.output_type)}")
+            self.logger.info(f"  Planning Interval: {self.planning_interval}")
+            self.logger.info(f"  Max Steps: {self.max_steps}")
+            self.logger.info(f"  Tools: {[tool.name for tool in tools]}")
 
     # --- Abstract methods/properties for subclasses ---
     @property
@@ -161,11 +162,6 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                 f"  Tools: {[tool.name for tool in self.tools]}"
             )
             self.logger.info(settings_info)
-        else:
-            text = (f"Starting {self.__class__.__name__} run.\n" 
-                    f"  Task: {task[:100]}...\n"
-               )
-            self.logger.info(text)
         try:
             # --- Initial Planning --- 
             if self.planning_interval: # Check if planning is enabled (interval is set)
@@ -237,7 +233,8 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                 result = await self._process_run_result(agent_run)
                 
                 # Log usage statistics at the end
-                self._log_usage_stats()
+                if self.verbose:
+                    self._log_usage_stats()
                 
                 return result
 
@@ -388,17 +385,18 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             self.logger.info("\n".join(log_lines))
 
     def _log_initial_model_request_node(self, node: ModelRequestNode) -> None:
-        log_lines = ["\n--- Model Request Node (Initial/Intermediate) ---", "Sending request to LLM with parts:"]
-        if hasattr(node.request, 'parts') and isinstance(node.request.parts, list):
-            for i, part in enumerate(node.request.parts):
-                part_content_str = str(getattr(part, 'content', '(No Content)'))[:150]
-                if len(str(getattr(part, 'content', ''))) > 150: part_content_str += "..."
-                log_lines.append(f"  Part {i+1}: {type(part).__name__} - Content: {part_content_str}")
-        else:
-            req_str = str(node.request)[:200] + ("..." if len(str(node.request)) > 200 else "")
-            log_lines.append(f"  Request (no parts attr or not list): {req_str}")
-        log_lines.append("---------------------------------------------")
-        self.logger.info("\n".join(log_lines))
+        if self.verbose:
+            log_lines = ["\n--- Model Request Node (Initial/Intermediate) ---", "Sending request to LLM with parts:"]
+            if hasattr(node.request, 'parts') and isinstance(node.request.parts, list):
+                for i, part in enumerate(node.request.parts):
+                    part_content_str = str(getattr(part, 'content', '(No Content)'))[:150]
+                    if len(str(getattr(part, 'content', ''))) > 150: part_content_str += "..."
+                    log_lines.append(f"  Part {i+1}: {type(part).__name__} - Content: {part_content_str}")
+            else:
+                req_str = str(node.request)[:200] + ("..." if len(str(node.request)) > 200 else "")
+                log_lines.append(f"  Request (no parts attr or not list): {req_str}")
+            log_lines.append("---------------------------------------------")
+            self.logger.info("\n".join(log_lines))
 
     def _log_call_tools_node(self, node: CallToolsNode) -> None:
         if self.verbose:
@@ -416,32 +414,34 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                         if len(args_str) > 150: args_str = args_str[:150] + "..."
                         actions_log.append(f"  Tool Call: {tool_name}(...) Args Preview: {args_str}")
                     # Potentially add subclass-specific logging for certain tools here if needed
-        log_lines.append("LLM Thought/Text Response:"); log_lines.append("-"*20)
-        log_lines.append(thought.strip() or "(No explicit thought text)"); log_lines.append("-"*20)
-        if actions_log: log_lines.extend(actions_log)
-        log_lines.append("---------------------------------------------")
-        self.logger.info("\n".join(log_lines))
+            log_lines.append("LLM Thought/Text Response:"); log_lines.append("-"*20)
+            log_lines.append(thought.strip() or "(No explicit thought text)"); log_lines.append("-"*20)
+            if actions_log: log_lines.extend(actions_log)
+            log_lines.append("---------------------------------------------")
+            self.logger.info("\n".join(log_lines))
 
     def _log_tool_return(self, node: ModelRequestNode) -> None:
-        log_lines = ["\n--- Tool Return Node (Observation) ---"]
-        observation = "(No tool return part found)"
-        tool_name = "Unknown"
-        if hasattr(node.request, 'parts') and isinstance(node.request.parts, list):
-            for part in node.request.parts:
-                if isinstance(part, messages.ToolReturnPart):
-                    tool_name = part.tool_name
-                    observation_content = str(part.content).strip()
-                    if len(observation_content) > 200: observation_content = observation_content[:200] + "..."
-                    observation = observation_content; break
-        log_lines.append(f"Observation from Tool '{tool_name}':"); log_lines.append("-"*20)
-        log_lines.append(observation); log_lines.append("-"*20)
-        log_lines.append("---------------------------------------")
-        self.logger.info("\n".join(log_lines))
+        if self.verbose:
+            log_lines = ["\n--- Tool Return Node (Observation) ---"]
+            observation = "(No tool return part found)"
+            tool_name = "Unknown"
+            if hasattr(node.request, 'parts') and isinstance(node.request.parts, list):
+                for part in node.request.parts:
+                    if isinstance(part, messages.ToolReturnPart):
+                        tool_name = part.tool_name
+                        observation_content = str(part.content).strip()
+                        if len(observation_content) > 200: observation_content = observation_content[:200] + "..."
+                        observation = observation_content; break
+            log_lines.append(f"Observation from Tool '{tool_name}':"); log_lines.append("-"*20)
+            log_lines.append(observation); log_lines.append("-"*20)
+            log_lines.append("---------------------------------------")
+            self.logger.info("\n".join(log_lines))
 
     def _log_end_node(self, node: End) -> None:
-        log_lines = ["\n--- End Node ---", "Agent execution graph finished.", "----------------"]
-        # Final result logging might be better handled in _process_run_result
-        self.logger.info("\n".join(log_lines))
+        if self.verbose:
+            log_lines = ["\n--- End Node ---", "Agent execution graph finished.", "----------------"]
+            # Final result logging might be better handled in _process_run_result
+            self.logger.info("\n".join(log_lines))
     # --- End Logging Helpers ---
 
     # --- Planning Methods (Common Framework) ---
@@ -484,7 +484,8 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
             planning_settings = ModelSettings(stop_sequences=["<end_plan>"])
             request_params = ModelRequestParameters(function_tools=[], allow_text_output=True, output_tools=[])
 
-            self.logger.debug(f"Rendered Planning Prompt (from {prompt_template_source}):\n---\n{rendered_user_prompt}\n---")
+            if self.verbose:
+                self.logger.debug(f"Rendered Planning Prompt (from {prompt_template_source}):\n---\n{rendered_user_prompt}\n---")
 
             response: Any = await self.model.request(
                 messages=[message],
