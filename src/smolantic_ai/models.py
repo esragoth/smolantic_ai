@@ -379,11 +379,15 @@ def reconstruct_node(pydantic_node: Any) -> Optional[Node]:
                             # Convert tool return content to a proper dictionary
                             if tool_return is None:
                                 tool_return = []
-                            tool_return.append({
+                            tool_return_dict = {
                                 'tool_name': getattr(part, 'tool_name', 'unknown'),
                                 'content': str(part.content),
                                 'tool_call_id': getattr(part, 'tool_call_id', None)
-                            })
+                            }
+                            # Capture metadata if present (from ToolReturn objects)
+                            if hasattr(part, 'metadata') and getattr(part, 'metadata', None) is not None:
+                                tool_return_dict['metadata'] = part.metadata
+                            tool_return.append(tool_return_dict)
                         elif part.part_kind == 'retry-prompt':
                             retry_prompt = str(part.content)
                 return ModelRequestNode(

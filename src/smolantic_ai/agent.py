@@ -329,10 +329,14 @@ class BaseAgent(Agent[DepsT, ResultT], Generic[DepsT, ResultT], abc.ABC):
                 if hasattr(tool_return_request, 'parts'):
                     for part in tool_return_request.parts:
                         if isinstance(part, messages.ToolReturnPart):
-                            tool_outputs.append({
+                            tool_output = {
                                 'name': part.tool_name,
                                 'output': part.content
-                            })
+                            }
+                            # Capture metadata if present (from ToolReturn objects)
+                            if hasattr(part, 'metadata') and part.metadata is not None:
+                                tool_output['metadata'] = part.metadata
+                            tool_outputs.append(tool_output)
                 
                 # Debug logging
                 if self.verbose:
